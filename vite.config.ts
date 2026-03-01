@@ -7,8 +7,10 @@ import {
   commitHumanFile,
   deleteBranch,
   discardBranch,
+  getActiveWorkspaceRoot,
   getAllBranchesSorted,
   getGitState,
+  listWorkspaces,
   mergeBranch,
   readBlogWorkspaceFiles,
   resetSandbox,
@@ -16,6 +18,7 @@ import {
   revertCommit,
   runAgentTask,
   saveBlogFile,
+  setActiveWorkspaceRoot,
 } from './server/gitAgent';
 import { getRuntimeStatus } from './server/codexBridge';
 
@@ -35,7 +38,7 @@ function sentinelApiPlugin(): Plugin {
         const files = readBlogWorkspaceFiles();
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({files}));
+        res.end(JSON.stringify({files, workspace_root: getActiveWorkspaceRoot()}));
       } catch (error) {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
@@ -49,7 +52,7 @@ function sentinelApiPlugin(): Plugin {
         const state = getGitState();
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({branches, state}));
+        res.end(JSON.stringify({branches, state, workspace_root: getActiveWorkspaceRoot()}));
       } catch (error) {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
@@ -63,6 +66,47 @@ function sentinelApiPlugin(): Plugin {
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify(runtime));
+      } catch (error) {
+        res.statusCode = 500;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: String(error) }));
+      }
+    });
+
+    middlewares.use('/api/workspaces', (_req, res) => {
+      try {
+        const workspaces = listWorkspaces();
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ workspaces, active_workspace: getActiveWorkspaceRoot() }));
+      } catch (error) {
+        res.statusCode = 500;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: String(error) }));
+      }
+    });
+
+    middlewares.use('/api/workspace/select', async (req, res) => {
+      if (req.method !== 'POST') {
+        res.statusCode = 405;
+        res.end('Method Not Allowed');
+        return;
+      }
+      try {
+        const raw = await readBody(req);
+        const body = raw ? JSON.parse(raw) : {};
+        const root = String(body.root || '').trim();
+        if (!root) {
+          res.statusCode = 400;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ error: 'root is required' }));
+          return;
+        }
+        const result = setActiveWorkspaceRoot(root);
+        const branches = getAllBranchesSorted();
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ ...result, branches }));
       } catch (error) {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
@@ -92,7 +136,7 @@ function sentinelApiPlugin(): Plugin {
         const result = runAgentTask(prompt, allowDestructive);
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify(result));
+        res.end(JSON.stringify({ ...result, workspace_root: getActiveWorkspaceRoot() }));
       } catch (error) {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
@@ -111,7 +155,7 @@ function sentinelApiPlugin(): Plugin {
         const result = resetSandbox();
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify(result));
+        res.end(JSON.stringify({ ...result, workspace_root: getActiveWorkspaceRoot() }));
       } catch (error) {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
@@ -133,7 +177,7 @@ function sentinelApiPlugin(): Plugin {
         const files = saveBlogFile(filePath, content);
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({files, state: getGitState()}));
+        res.end(JSON.stringify({files, state: getGitState(), workspace_root: getActiveWorkspaceRoot()}));
       } catch (error) {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
@@ -155,7 +199,7 @@ function sentinelApiPlugin(): Plugin {
         const result = commitHumanFile(filePath, goal);
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify(result));
+        res.end(JSON.stringify({ ...result, workspace_root: getActiveWorkspaceRoot() }));
       } catch (error) {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
@@ -176,7 +220,7 @@ function sentinelApiPlugin(): Plugin {
         const result = checkoutCommitSafely(commitHash);
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify(result));
+        res.end(JSON.stringify({ ...result, workspace_root: getActiveWorkspaceRoot() }));
       } catch (error) {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
@@ -198,7 +242,7 @@ function sentinelApiPlugin(): Plugin {
         const result = returnToBranchHead(branch, stashRef);
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify(result));
+        res.end(JSON.stringify({ ...result, workspace_root: getActiveWorkspaceRoot() }));
       } catch (error) {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
@@ -219,7 +263,7 @@ function sentinelApiPlugin(): Plugin {
         const result = revertCommit(commitHash);
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify(result));
+        res.end(JSON.stringify({ ...result, workspace_root: getActiveWorkspaceRoot() }));
       } catch (error) {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
@@ -241,7 +285,7 @@ function sentinelApiPlugin(): Plugin {
         const result = mergeBranch(sourceBranch, targetBranch);
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify(result));
+        res.end(JSON.stringify({ ...result, workspace_root: getActiveWorkspaceRoot() }));
       } catch (error) {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
@@ -263,7 +307,7 @@ function sentinelApiPlugin(): Plugin {
         const result = deleteBranch(branch, fallbackBranch);
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify(result));
+        res.end(JSON.stringify({ ...result, workspace_root: getActiveWorkspaceRoot() }));
       } catch (error) {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
@@ -285,7 +329,7 @@ function sentinelApiPlugin(): Plugin {
         const result = discardBranch(branch, fallbackBranch);
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify(result));
+        res.end(JSON.stringify({ ...result, workspace_root: getActiveWorkspaceRoot() }));
       } catch (error) {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');

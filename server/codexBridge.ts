@@ -225,6 +225,7 @@ export function generateStarCommitMessageWithCodex(filePath: string, diff: strin
 export function generateTaskOperationsWithCodex(
   prompt: string,
   fileContext: Record<string, string>,
+  workspaceRoot = 'testbench/blog',
 ): CodexPlannedOperation[] | null {
   lastPlannerError = '';
   const cfg = getOpenAiConfig();
@@ -240,7 +241,7 @@ export function generateTaskOperationsWithCodex(
   const requestPlan = (context: Record<string, string>): CodexPlannedOperation[] | null => {
     const promptText = [
       'Plan atomic file operations for a git-based coding agent.',
-      'Only plan operations inside testbench/blog.',
+      `Only plan operations inside ${workspaceRoot}.`,
       'Prioritize directly requested feature/file changes.',
       'For write operations, provide full file content in newContent.',
       'For delete operations, still provide newContent as an empty string.',
@@ -321,12 +322,13 @@ export function generateFileContentWithCodex(
   relPath: string,
   taskPrompt: string,
   currentContent?: string,
+  workspaceRoot = 'testbench/blog',
 ): string | null {
   const cfg = getOpenAiConfig();
   if (!cfg) return null;
 
   const input = [
-    'Generate complete file content for a single file update in testbench/blog.',
+    `Generate complete file content for a single file update in ${workspaceRoot}.`,
     'Return only file content. No markdown fences. No explanation.',
     '',
     `Task prompt: ${taskPrompt}`,

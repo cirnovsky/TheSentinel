@@ -10,6 +10,12 @@ import { Message, Commit, GitState, RuntimeStatus } from './types';
 import { INITIAL_MESSAGES } from './data';
 import { TESTBENCH_BLOG_FILES, DEFAULT_BLOG_FILE } from './testbenchFiles';
 
+type WorkspaceEntry = {
+  root: string;
+  absolutePath: string;
+  is_git_repo: boolean;
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<'chat' | 'git' | 'test'>(() => {
     const saved = localStorage.getItem('sentinel_active_tab');
@@ -64,6 +70,8 @@ export default function App() {
     prompt: '',
     nonce: 0,
   });
+  const [availableWorkspaces, setAvailableWorkspaces] = useState<WorkspaceEntry[]>([]);
+  const [workspaceRoot, setWorkspaceRoot] = useState<string>('testbench/blog');
 
   useEffect(() => {
     localStorage.setItem('sentinel_messages', JSON.stringify(messages));
@@ -86,7 +94,6 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('sentinel_active_tab', activeTab);
   }, [activeTab]);
-
   const refreshFromGit = async () => {
     try {
       const [filesResponse, branchesResponse, runtimeResponse] = await Promise.all([
@@ -96,9 +103,12 @@ export default function App() {
       ]);
 
       if (filesResponse.ok) {
-        const filesPayload = (await filesResponse.json()) as {files?: Record<string, string>};
+        const filesPayload = (await filesResponse.json()) as {files?: Record<string, string>; workspace_root?: string};
         if (filesPayload.files) {
           setWorkspaceFiles(filesPayload.files);
+        }
+        if (filesPayload.workspace_root) {
+          setWorkspaceRoot(filesPayload.workspace_root);
         }
       }
 
@@ -106,6 +116,7 @@ export default function App() {
         const branchPayload = (await branchesResponse.json()) as {
           branches?: Record<string, Commit[]>;
           state?: GitState;
+          workspace_root?: string;
         };
         if (branchPayload.branches) {
           setBranches(branchPayload.branches);
@@ -122,11 +133,21 @@ export default function App() {
             setActiveBranch(branchPayload.state.current_branch);
           }
         }
+        if (branchPayload.workspace_root) {
+          setWorkspaceRoot(branchPayload.workspace_root);
+        }
       }
 
       if (runtimeResponse.ok) {
         const runtimePayload = (await runtimeResponse.json()) as RuntimeStatus;
         setRuntimeStatus(runtimePayload);
+      }
+
+      const workspaceResponse = await fetch('/api/workspaces');
+      if (workspaceResponse.ok) {
+        const workspacePayload = (await workspaceResponse.json()) as { workspaces?: WorkspaceEntry[]; active_workspace?: string };
+        if (workspacePayload.workspaces) setAvailableWorkspaces(workspacePayload.workspaces);
+        if (workspacePayload.active_workspace) setWorkspaceRoot(workspacePayload.active_workspace);
       }
     } catch {
       // Keep fallback data when local API is not available.
@@ -134,7 +155,36 @@ export default function App() {
   };
 
   useEffect(() => {
-    refreshFromGit();
+    const bootstrap = async () => {
+      try {
+        const response = await fetch('/api/workspace/select', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ root: 'testbench/blog' }),
+        });
+        if (response.ok) {
+          const payload = (await response.json()) as {
+            workspace_root?: string;
+            files?: Record<string, string>;
+            state?: GitState;
+            branches?: Record<string, Commit[]>;
+          };
+          if (payload.workspace_root) setWorkspaceRoot(payload.workspace_root);
+          if (payload.files) setWorkspaceFiles(payload.files);
+          if (payload.state) {
+            setGitState(payload.state);
+            if (!payload.state.detached && payload.state.current_branch) {
+              setActiveBranch(payload.state.current_branch);
+            }
+          }
+          if (payload.branches) setBranches(payload.branches);
+        }
+      } catch {
+        // Non-fatal fallback to existing behavior.
+      }
+      await refreshFromGit();
+    };
+    bootstrap();
   }, []);
 
   const handleCheckoutCommit = async (commit: Commit) => {
@@ -162,6 +212,41 @@ export default function App() {
     if (commit.files && commit.files.length > 0) {
       setSelectedFile(commit.files[0]);
     }
+  };
+
+  const handleSelectWorkspace = async (root: string) => {
+    const response = await fetch('/api/workspace/select', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ root }),
+    });
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(err || `Failed to switch workspace to ${root}`);
+    }
+    const payload = (await response.json()) as {
+      workspace_root?: string;
+      files?: Record<string, string>;
+      state?: GitState;
+      branches?: Record<string, Commit[]>;
+    };
+    if (payload.workspace_root) setWorkspaceRoot(payload.workspace_root);
+    if (payload.files) {
+      setWorkspaceFiles(payload.files);
+      const candidates = Object.keys(payload.files).sort((a, b) => a.localeCompare(b));
+      setSelectedFile(candidates[0] ?? null);
+    }
+    if (payload.state) {
+      setGitState(payload.state);
+      if (!payload.state.detached && payload.state.current_branch) {
+        setActiveBranch(payload.state.current_branch);
+      }
+    }
+    if (payload.branches) {
+      setBranches(payload.branches);
+    }
+    setSelectedCommit(null);
+    setStashRef(null);
   };
 
   const handleViewDiff = (commit: Commit) => {
@@ -217,7 +302,7 @@ export default function App() {
       }
     }
 
-    const result = (await response.json()) as {
+      const result = (await response.json()) as {
       branch: string;
       commits: Commit[];
       branch_commits?: Commit[];
@@ -225,6 +310,7 @@ export default function App() {
       git_tree: string;
       files: Record<string, string>;
       state?: GitState;
+      workspace_root?: string;
     };
 
     setWorkspaceFiles(result.files);
@@ -236,6 +322,9 @@ export default function App() {
     if (result.state) {
       setGitState(result.state);
     }
+    if (result.workspace_root) {
+      setWorkspaceRoot(result.workspace_root);
+    }
 
     if (result.commits.length > 0 && result.commits[0].files.length > 0) {
       setSelectedFile(result.commits[0].files[0]);
@@ -245,6 +334,7 @@ export default function App() {
       branchName: result.branch,
       totalCommits: result.total_commits,
       gitTree: result.git_tree,
+      workspaceRoot: result.workspace_root || workspaceRoot,
     };
   };
 
@@ -336,6 +426,9 @@ export default function App() {
   };
 
   const handleLoadScenario = async (prompt: string) => {
+    if (workspaceRoot !== 'testbench/blog') {
+      await handleSelectWorkspace('testbench/blog');
+    }
     const response = await fetch('/api/reset-sandbox', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -357,11 +450,38 @@ export default function App() {
           <TestPage onLoadScenario={handleLoadScenario} />
         ) : (
           <div className="flex-1 flex min-w-0 min-h-0">
-            <FileExplorer
-              filePaths={Object.keys(workspaceFiles)}
-              selectedFile={selectedFile}
-              onSelectFile={setSelectedFile}
-            />
+            <div className="w-[320px] shrink-0 border-r border-white/10 bg-[#111111] flex flex-col min-h-0">
+              <div className="px-3 py-2 border-b border-white/10 text-[11px] uppercase tracking-wider text-gray-500 shrink-0">
+                Workspace
+              </div>
+              <div className="p-2 border-b border-white/10">
+                <select
+                  value={workspaceRoot}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    handleSelectWorkspace(next).catch(() => {});
+                  }}
+                  className="w-full h-9 bg-black/40 border border-white/10 rounded-md px-2 text-xs text-gray-200 focus:outline-none focus:border-emerald-500/50"
+                >
+                  {availableWorkspaces.length === 0 ? (
+                    <option value={workspaceRoot}>{workspaceRoot}</option>
+                  ) : null}
+                  {availableWorkspaces.map((ws) => (
+                    <option key={ws.root} value={ws.root}>
+                      {ws.root}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex-1 min-h-0">
+                <FileExplorer
+                  rootPath={workspaceRoot}
+                  filePaths={Object.keys(workspaceFiles)}
+                  selectedFile={selectedFile}
+                  onSelectFile={setSelectedFile}
+                />
+              </div>
+            </div>
             <div className="flex-1 relative min-w-0 min-h-0">
               <CodeEditor
                 file={selectedFile}

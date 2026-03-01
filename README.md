@@ -17,13 +17,17 @@ Project Demo Video: [Add video link here](https://example.com/demo)
 - `Git` (2.30+)
 - `Node.js` (18+ recommended)
 - `npm` (9+ recommended)
-- `Python` (3.10+)
 - Codex/OpenAI API access (`OPENAI_API_KEY`)
+
+### Optional software (only for standalone Python API demo)
+
+- `Python` (3.10+)
+- `uv` (latest)
 
 ### Dependencies
 
 - Frontend + app server dependencies are managed by `npm` via [`package.json`](/Users/cirnovsky/repos/dlweek/TheSentinel/package.json).
-- Python safeguard API dependencies are managed by [`requirements.txt`](/Users/cirnovsky/repos/dlweek/TheSentinel/requirements.txt).
+- Optional Python safeguard API dependencies are managed by [`requirements.txt`](/Users/cirnovsky/repos/dlweek/TheSentinel/requirements.txt).
 
 ### Environment setup
 
@@ -52,13 +56,22 @@ Notes:
 
 Run from repository root: `/Users/cirnovsky/repos/dlweek/TheSentinel`
 
+### Default setup (recommended)
+
+```bash
+cd /Users/cirnovsky/repos/dlweek/TheSentinel
+npm install
+```
+
+### Optional Python setup (standalone API demo)
+
 ### macOS / Linux
 
 ```bash
 cd /Users/cirnovsky/repos/dlweek/TheSentinel
-python3 -m venv .venv
+uv venv
 source .venv/bin/activate
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 npm install
 ```
 
@@ -66,9 +79,9 @@ npm install
 
 ```powershell
 cd C:\path\to\TheSentinel
-python -m venv .venv
+uv venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 npm install
 ```
 
@@ -76,42 +89,87 @@ npm install
 
 ```bat
 cd C:\path\to\TheSentinel
-python -m venv .venv
+uv venv
 .\.venv\Scripts\activate.bat
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 npm install
 ```
 
 ## 4. Running the Services
 
-Start both services concurrently in separate terminals.
+### Default run (recommended)
 
-### Terminal A: Python backend (Sentinel API)
-
-```bash
-cd /Users/cirnovsky/repos/dlweek/TheSentinel
-source .venv/bin/activate  # Windows: .\.venv\Scripts\Activate.ps1
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
-### Terminal B: React frontend + app server
+Only one service is required for the full app experience:
 
 ```bash
 cd /Users/cirnovsky/repos/dlweek/TheSentinel
 npm run dev
 ```
 
-Frontend URL:
+Frontend + in-app API URL:
 - `http://localhost:3000`
+
+### Optional standalone Python API
+
+Only run this if you want to demo Python endpoints directly.
+
+Terminal A:
+
+```bash
+cd /Users/cirnovsky/repos/dlweek/TheSentinel
+uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Terminal B:
+
+```bash
+cd /Users/cirnovsky/repos/dlweek/TheSentinel
+npm run dev
+```
 
 Python API URL:
 - `http://localhost:8000/health`
 
+### Check If You Are on Codex!
+
+Check if your Codex is properly installed by looking at the top right banner.
+
+![](assets/homepage.png)
+
+If it reads `Local Fallback`, then:
+
+1. Verify your key exists and is non-empty in `.env.local`:
+```bash
+cat .env.local
+```
+Expected:
+```env
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4.1
+```
+
+2. Avoid unavailable model names (for example `codex-latest` may fail in some accounts). Use:
+```env
+OPENAI_MODEL=gpt-4.1
+```
+
+3. Restart the dev server after any `.env.local` change:
+```bash
+# stop current server first (Ctrl+C), then:
+npm run dev
+```
+
+4. Confirm runtime status:
+- Open `http://localhost:3000`
+- In the runtime banner, verify it shows Codex/OpenAI mode (not Local Fallback)
+
+5. If still failing, confirm your API key has active billing/access in your OpenAI project and regenerate a new key.
+
 ## 5. How to Test / Evaluate (The Golden Path)
 
-Judges should use the built-in in-app testing flow first.
+Judges are recommended to use the built-in in-app testing flow first.
 
-1. Start services using Section 4.
+1. Start the app with `npm run dev` (Section 4 default run).
 2. Open `http://localhost:3000`.
 3. Navigate to the **Interactive Sandbox** (`Test`) page.
 4. Run the built-in scenarios:
@@ -120,9 +178,50 @@ Judges should use the built-in in-app testing flow first.
 - Secret Exposure
 5. Click **Load Scenario**, return to chat with prefilled malicious prompt, submit, and verify intercept behavior/risk report.
 
-Detailed judge guide is in:
+After trying preset scenarios, you can also type your own prompts in Chat and inspect:
+- branch creation
+- atomic STAR commits
+- git diffs in the visualizer
+- approve/merge vs reject/discard flows
+
+Detailed judge guide:
 - [`testbench/TESTBENCH_SETUP.md`](/Users/cirnovsky/repos/dlweek/TheSentinel/testbench/TESTBENCH_SETUP.md)
 
-Test resources are in:
+Test resources:
 - [`testbench/scripts/test_cases.md`](/Users/cirnovsky/repos/dlweek/TheSentinel/testbench/scripts/test_cases.md)
 - [`testbench/scripts/ui_test_resources.json`](/Users/cirnovsky/repos/dlweek/TheSentinel/testbench/scripts/ui_test_resources.json)
+
+## 6. Run The Test Blog Directly (Optional)
+
+If you want to run only the mini blog project used by the testbench:
+
+### macOS / Linux
+
+```bash
+cd /Users/cirnovsky/repos/dlweek/TheSentinel/testbench/blog
+npm install
+npm run dev
+```
+
+### Windows (PowerShell)
+
+```powershell
+cd C:\path\to\TheSentinel\testbench\blog
+npm install
+npm run dev
+```
+
+### Windows (Command Prompt)
+
+```bat
+cd C:\path\to\TheSentinel\testbench\blog
+npm install
+npm run dev
+```
+
+Blog URL:
+- `http://localhost:4173`
+
+Notes:
+- This runs the blog app only.
+- Sentinel chat/governance UI runs from the root app at `http://localhost:3000`.

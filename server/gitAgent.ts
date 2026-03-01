@@ -43,7 +43,7 @@ export type AgentTaskResponse = {
 };
 
 const ROOT_DIR = process.cwd();
-const BLOG_DIR = path.resolve(ROOT_DIR, 'testbench/blog');
+const DEFAULT_WORKSPACE_ROOT = 'testbench/blog';
 const SIGNED_OFF_BY = 'Signed-off-by: The Sentinel App <sentinel@local>';
 const PROTECTED_PATHS = new Set(['.git', 'node_modules', 'dist']);
 const PROTECTED_PREFIXES = ['.git/', 'node_modules/', 'dist/'];
@@ -63,9 +63,95 @@ const SCAFFOLD_FILES = [
   'src/lib/posts.js',
 ];
 
+type WorkspaceInfo = {
+  root: string;
+  absolutePath: string;
+  is_git_repo: boolean;
+};
+
+let activeWorkspaceRoot = DEFAULT_WORKSPACE_ROOT;
+
+function workspaceRoot(): string {
+  return activeWorkspaceRoot;
+}
+
+function workspaceDir(): string {
+  return path.resolve(ROOT_DIR, workspaceRoot());
+}
+
+function normalizeWorkspaceRoot(value: string): string {
+  const rel = value.replace(/\\/g, '/').replace(/^\/+/, '').trim().replace(/\/+$/, '');
+  if (!rel || rel.includes('..')) throw new Error(`Invalid workspace root: ${value}`);
+  const full = path.resolve(ROOT_DIR, rel);
+  if (!full.startsWith(ROOT_DIR)) throw new Error(`Workspace is outside project root: ${value}`);
+  if (!fs.existsSync(full) || !fs.statSync(full).isDirectory()) {
+    throw new Error(`Workspace directory not found: ${value}`);
+  }
+  return rel;
+}
+
+function discoverGitWorkspaces(): WorkspaceInfo[] {
+  const found = new Map<string, WorkspaceInfo>();
+
+  const addWorkspace = (absDir: string) => {
+    const rel = path.relative(ROOT_DIR, absDir).replace(/\\/g, '/');
+    if (!rel || rel.startsWith('..')) return;
+    const key = rel || '.';
+    if (found.has(key)) return;
+    found.set(key, {
+      root: key,
+      absolutePath: absDir,
+      is_git_repo: fs.existsSync(path.join(absDir, '.git')),
+    });
+  };
+
+  const walk = (dir: string, depth: number) => {
+    if (depth > 4) return;
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === '.venv' || entry.name === '.git') continue;
+      const full = path.join(dir, entry.name);
+      if (fs.existsSync(path.join(full, '.git'))) {
+        addWorkspace(full);
+        continue;
+      }
+      walk(full, depth + 1);
+    }
+  };
+
+  addWorkspace(workspaceDir());
+  const defaultDir = path.resolve(ROOT_DIR, DEFAULT_WORKSPACE_ROOT);
+  if (fs.existsSync(defaultDir)) addWorkspace(defaultDir);
+  walk(ROOT_DIR, 0);
+
+  return Array.from(found.values()).sort((a, b) => {
+    if (a.root === DEFAULT_WORKSPACE_ROOT) return -1;
+    if (b.root === DEFAULT_WORKSPACE_ROOT) return 1;
+    return a.root.localeCompare(b.root);
+  });
+}
+
+export function getActiveWorkspaceRoot(): string {
+  return workspaceRoot();
+}
+
+export function listWorkspaces(): WorkspaceInfo[] {
+  return discoverGitWorkspaces();
+}
+
+export function setActiveWorkspaceRoot(root: string): { workspace_root: string; files: Record<string, string>; state: GitState } {
+  activeWorkspaceRoot = normalizeWorkspaceRoot(root);
+  return {
+    workspace_root: workspaceRoot(),
+    files: readBlogWorkspaceFiles(),
+    state: getGitState(),
+  };
+}
+
 function runGit(args: string[]): string {
   return execFileSync('git', args, {
-    cwd: BLOG_DIR,
+    cwd: workspaceDir(),
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
@@ -80,7 +166,7 @@ function tryGit(args: string[]): { ok: boolean; output: string } {
 }
 
 function writeIfMissing(relPath: string, content: string): void {
-  const full = path.join(BLOG_DIR, relPath);
+  const full = path.join(workspaceDir(), relPath);
   if (fs.existsSync(full)) return;
   fs.mkdirSync(path.dirname(full), { recursive: true });
   fs.writeFileSync(full, content, 'utf-8');
@@ -102,6 +188,7 @@ function defaultScaffoldContent(relPath: string): string {
 }
 
 function ensureTrackedScaffoldFiles(): void {
+  if (workspaceRoot() !== DEFAULT_WORKSPACE_ROOT) return;
   const branchOrHead = runGit(['rev-parse', '--abbrev-ref', 'HEAD']);
   if (branchOrHead === 'HEAD') return;
   if (branchOrHead.startsWith('sentinel/task-')) return;
@@ -127,21 +214,21 @@ function ensureTrackedScaffoldFiles(): void {
     'Result: Switching between branches now preserves a runnable blog structure without import resolution errors.',
   ].join('\n'));
 
-  const msgFile = path.join(BLOG_DIR, '.git', 'SENTINEL_SCAFFOLD_MSG');
+  const msgFile = path.join(workspaceDir(), '.git', 'SENTINEL_SCAFFOLD_MSG');
   fs.writeFileSync(msgFile, message, 'utf-8');
   runGit(['commit', '-F', msgFile]);
   fs.unlinkSync(msgFile);
 }
 
 function ensureGitRepo(): void {
-  if (!fs.existsSync(path.join(BLOG_DIR, '.git'))) {
+  if (!fs.existsSync(path.join(workspaceDir(), '.git'))) {
     runGit(['init']);
   }
 
   runGit(['config', 'user.email', 'sentinel@local']);
   runGit(['config', 'user.name', 'The Sentinel App']);
 
-  const gitignorePath = path.join(BLOG_DIR, '.gitignore');
+  const gitignorePath = path.join(workspaceDir(), '.gitignore');
   const defaults = ['node_modules/', 'dist/', '.DS_Store'];
   const existing = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, 'utf-8') : '';
   const merged = [...new Set([...existing.split('\n').filter(Boolean), ...defaults])].join('\n') + '\n';
@@ -174,7 +261,7 @@ function listBlogFiles(): string[] {
     }
   };
 
-  walk(BLOG_DIR);
+  walk(workspaceDir());
   return out.sort((a, b) => a.localeCompare(b));
 }
 
@@ -190,10 +277,11 @@ export function readBlogWorkspaceFiles(): Record<string, string> {
 }
 
 function toBlogRelativePath(filePath: string): string {
-  if (!filePath.startsWith('testbench/blog/')) {
-    throw new Error('Only files under testbench/blog are writable.');
+  const root = workspaceRoot();
+  if (!filePath.startsWith(`${root}/`)) {
+    throw new Error(`Only files under ${root} are writable.`);
   }
-  const rel = filePath.replace('testbench/blog/', '');
+  const rel = filePath.replace(`${root}/`, '');
   if (rel.includes('..')) throw new Error('Invalid file path');
   return rel;
 }
@@ -227,25 +315,29 @@ function readIfExists(fullPath: string): string {
 
 function buildPlanningContext(): Record<string, string> {
   const files = readBlogWorkspaceFiles();
+  const root = workspaceRoot();
   const entries = Object.entries(files)
-    .filter(([filePath]) => filePath.startsWith('testbench/blog/'))
+    .filter(([filePath]) => filePath.startsWith(`${root}/`))
     .sort((a, b) => a[0].localeCompare(b[0]))
     .slice(0, 80);
 
   const context: Record<string, string> = {};
   for (const [filePath, content] of entries) {
-    const relPath = filePath.replace('testbench/blog/', '');
+    const relPath = filePath.replace(`${root}/`, '');
     context[relPath] = content.length > 700 ? `${content.slice(0, 700)}\n...` : content;
   }
   return context;
 }
 
 function normalizeOperation(raw: Operation): Operation {
-  const relPath = raw.relPath
-    .replace(/^\/+/, '')
-    .replace(/^testbench\/blog\//, '')
-    .replace(/\\/g, '/')
-    .trim();
+  const root = workspaceRoot();
+  const rootBase = path.posix.basename(root);
+  let relPath = raw.relPath.replace(/\\/g, '/').trim();
+  relPath = relPath.replace(/^\/+/, '');
+  // Planner may return repo-absolute or project-prefixed paths. Canonicalize to blog-root relative path.
+  relPath = relPath.replace(new RegExp(`^${root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/`), '');
+  relPath = relPath.replace(/^\.\/+/, '');
+  relPath = relPath.replace(new RegExp(`^${rootBase}/`), '');
   if (!relPath || relPath.includes('..')) throw new Error(`Invalid operation path: ${raw.relPath}`);
   if (raw.kind !== 'write' && raw.kind !== 'delete') throw new Error(`Invalid operation kind: ${raw.kind}`);
   return {
@@ -278,7 +370,7 @@ function validatePlannedPath(relPath: string): void {
 
 function planOperations(prompt: string): Operation[] {
   const planningContext = buildPlanningContext();
-  const generated = generateTaskOperationsWithCodex(prompt, planningContext);
+  const generated = generateTaskOperationsWithCodex(prompt, planningContext, workspaceRoot());
   if (!generated || generated.length === 0) return [];
 
   const normalized = generated.map((op) => normalizeOperation({
@@ -291,9 +383,14 @@ function planOperations(prompt: string): Operation[] {
   for (const op of normalized) {
     validatePlannedPath(op.relPath);
     if (op.kind === 'write' && typeof op.newContent !== 'string') {
-      const fullPath = path.join(BLOG_DIR, op.relPath);
+      const fullPath = path.join(workspaceDir(), op.relPath);
       const current = readIfExists(fullPath);
-      const generatedContent = generateFileContentWithCodex(op.relPath, `${prompt}\n\nOperation goal: ${op.goal}`, current || undefined);
+      const generatedContent = generateFileContentWithCodex(
+        op.relPath,
+        `${prompt}\n\nOperation goal: ${op.goal}`,
+        current || undefined,
+        workspaceRoot(),
+      );
       if (!generatedContent) {
         throw new Error(`Unable to generate content for write operation: ${op.relPath}`);
       }
@@ -305,7 +402,7 @@ function planOperations(prompt: string): Operation[] {
 }
 
 function writeOperation(operation: Operation): void {
-  const fullPath = path.join(BLOG_DIR, operation.relPath);
+  const fullPath = path.join(workspaceDir(), operation.relPath);
   if (operation.kind === 'delete') {
     if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
     return;
@@ -333,7 +430,7 @@ function starMessage(relPath: string, goal: string, diff: string, kind: 'write' 
   const added = diff.split('\n').filter((line) => line.startsWith('+') && !line.startsWith('+++')).length;
   const removed = diff.split('\n').filter((line) => line.startsWith('-') && !line.startsWith('---')).length;
   const verb = kind === 'delete' ? 'remove' : 'update';
-  const displayPath = `testbench/blog/${relPath}`;
+  const displayPath = `${workspaceRoot()}/${relPath}`;
 
   const codexMessage = generateStarCommitMessageWithCodex(displayPath, diff);
   if (codexMessage && isValidStarMessage(codexMessage, displayPath)) {
@@ -412,7 +509,7 @@ function parseGitLog(raw: string): ApiCommit[] {
         .split('\n')
         .map((line) => line.trim())
         .filter(Boolean)
-        .map((line) => `testbench/blog/${line.replace(/\\/g, '/')}`);
+        .map((line) => `${workspaceRoot()}/${line.replace(/\\/g, '/')}`);
       const diff = runGit(['show', '--pretty=format:', '--unified=3', fullHash]);
       return {
         id: `${fullHash}-${index}`,
@@ -471,7 +568,7 @@ export function getGitState(): GitState {
 export function saveBlogFile(filePath: string, content: string): Record<string, string> {
   ensureGitRepo();
   const relPath = toBlogRelativePath(filePath);
-  const full = path.join(BLOG_DIR, relPath);
+  const full = path.join(workspaceDir(), relPath);
   fs.mkdirSync(path.dirname(full), { recursive: true });
   fs.writeFileSync(full, content, 'utf-8');
   return readBlogWorkspaceFiles();
@@ -503,7 +600,7 @@ export function commitHumanFile(filePath: string, goal: string): { commit: ApiCo
     codexMessage && isValidStarMessage(codexMessage, filePath) ? codexMessage : fallbackMessage,
   );
 
-  const msgFile = path.join(BLOG_DIR, '.git', 'SENTINEL_HUMAN_COMMIT_MSG');
+  const msgFile = path.join(workspaceDir(), '.git', 'SENTINEL_HUMAN_COMMIT_MSG');
   fs.writeFileSync(msgFile, message, 'utf-8');
   runGit(['commit', '-F', msgFile]);
   fs.unlinkSync(msgFile);
@@ -706,7 +803,7 @@ export function runAgentTask(prompt: string, allowDestructive = false): AgentTas
     if (!cachedDiff.trim()) return;
 
     const message = starMessage(operation.relPath, operation.goal, cachedDiff, operation.kind);
-    const msgFile = path.join(BLOG_DIR, '.git', 'SENTINEL_COMMIT_MSG');
+    const msgFile = path.join(workspaceDir(), '.git', 'SENTINEL_COMMIT_MSG');
     fs.writeFileSync(msgFile, message, 'utf-8');
     runGit(['commit', '-F', msgFile]);
     fs.unlinkSync(msgFile);
@@ -722,7 +819,7 @@ export function runAgentTask(prompt: string, allowDestructive = false): AgentTas
       date: 'just now',
       message: fullMessage,
       diff,
-      files: [`testbench/blog/${operation.relPath.replace(/\\/g, '/')}`],
+      files: [`${workspaceRoot()}/${operation.relPath.replace(/\\/g, '/')}`],
     });
   });
 

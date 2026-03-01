@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ChevronRight, FileCode2, Folder, FolderOpen } from 'lucide-react';
 
 interface FileExplorerProps {
+  rootPath: string;
   filePaths: string[];
   selectedFile: string | null;
   onSelectFile: (filePath: string) => void;
@@ -14,8 +15,6 @@ type FileNode = {
   children: Record<string, FileNode>;
 };
 
-const ROOT_PATH = 'testbench/blog';
-
 function createDirNode(name: string, path: string): FileNode {
   return { name, path, type: 'dir', children: {} };
 }
@@ -24,26 +23,31 @@ function createFileNode(name: string, path: string): FileNode {
   return { name, path, type: 'file', children: {} };
 }
 
-export default function FileExplorer({ filePaths, selectedFile, onSelectFile }: FileExplorerProps) {
+export default function FileExplorer({ rootPath, filePaths, selectedFile, onSelectFile }: FileExplorerProps) {
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(
-    () => new Set(['testbench/blog', 'testbench/blog/src', 'testbench/blog/database', 'testbench/blog/database/posts']),
+    () => new Set([rootPath]),
   );
 
+  useEffect(() => {
+    setExpandedDirs(new Set([rootPath]));
+  }, [rootPath]);
+
   const tree = useMemo(() => {
-    const root = createDirNode('blog', ROOT_PATH);
+    const rootName = rootPath.split('/').filter(Boolean).slice(-1)[0] || rootPath;
+    const root = createDirNode(rootName, rootPath);
 
     const scopedPaths = filePaths
-      .filter((path) => path.startsWith(`${ROOT_PATH}/`))
+      .filter((path) => path.startsWith(`${rootPath}/`))
       .sort((a, b) => a.localeCompare(b));
 
     for (const fullPath of scopedPaths) {
-      const relative = fullPath.replace(`${ROOT_PATH}/`, '');
+      const relative = fullPath.replace(`${rootPath}/`, '');
       const segments = relative.split('/').filter(Boolean);
 
       let cursor = root;
       segments.forEach((segment, index) => {
         const isFile = index === segments.length - 1;
-        const nodePath = `${ROOT_PATH}/${segments.slice(0, index + 1).join('/')}`;
+        const nodePath = `${rootPath}/${segments.slice(0, index + 1).join('/')}`;
 
         if (!cursor.children[segment]) {
           cursor.children[segment] = isFile
@@ -56,7 +60,7 @@ export default function FileExplorer({ filePaths, selectedFile, onSelectFile }: 
     }
 
     return root;
-  }, [filePaths]);
+  }, [filePaths, rootPath]);
 
   const toggleDir = (path: string) => {
     setExpandedDirs((prev) => {
@@ -111,7 +115,7 @@ export default function FileExplorer({ filePaths, selectedFile, onSelectFile }: 
   };
 
   return (
-    <div className="h-full w-[320px] shrink-0 border-r border-white/10 bg-[#111111] flex flex-col min-h-0">
+    <div className="h-full flex flex-col min-h-0">
       <div className="px-3 py-2 border-b border-white/10 text-[11px] uppercase tracking-wider text-gray-500 shrink-0">
         File Explorer
       </div>

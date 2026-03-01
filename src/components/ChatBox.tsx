@@ -20,6 +20,7 @@ interface ChatBoxProps {
     branchName: string;
     totalCommits: number;
     gitTree: string;
+    workspaceRoot?: string;
   }>;
   runtimeStatus: RuntimeStatus;
   prefillPrompt?: string;
@@ -158,6 +159,7 @@ export default function ChatBox({
               branch: taskRun.branchName,
               total_commits: taskRun.totalCommits,
               git_tree: taskRun.gitTree,
+              workspace_root: taskRun.workspaceRoot || 'unknown',
             },
             null,
             2,
@@ -251,6 +253,7 @@ export default function ChatBox({
             branch: taskRun.branchName,
             total_commits: taskRun.totalCommits,
             git_tree: taskRun.gitTree,
+            workspace_root: taskRun.workspaceRoot || 'unknown',
           },
           null,
           2,

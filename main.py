@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from pydantic import BaseModel
 
 from testbench.sentinel.git_skill import SentinelGitSkill
@@ -25,6 +25,21 @@ class AnalyzeDiffRequest(BaseModel):
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/")
+def root() -> dict[str, str]:
+    return {
+        "service": "The Sentinel Python API",
+        "status": "ok",
+        "health": "/health",
+        "docs": "/docs",
+    }
+
+
+@app.get("/favicon.ico")
+def favicon() -> Response:
+    return Response(status_code=204)
 
 
 @app.post("/api/mcp/analyze")
