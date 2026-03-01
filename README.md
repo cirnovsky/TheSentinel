@@ -132,6 +132,8 @@ Python API URL:
 
 ### Check If You Are on Codex!
 
+**It is of vital importance that you are on Codex. Please kindly read through this section carefully.**
+
 Check if your Codex is properly installed by looking at the top right banner.
 
 ![](assets/homepage.png)
