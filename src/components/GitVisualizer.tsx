@@ -1,106 +1,83 @@
 import { useState } from 'react';
-import { motion } from 'motion/react';
-import { GitCommit, GitBranch, Terminal, FileCode2 } from 'lucide-react';
-
-interface Commit {
-  id: string;
-  hash: string;
-  author: string;
-  date: string;
-  message: string;
-  diff: string;
-  files: string[];
-}
-
-const MOCK_COMMITS: Commit[] = [
-  {
-    id: '1',
-    hash: 'a1b2c3d',
-    author: 'The Sentinel',
-    date: '10 mins ago',
-    message: `Update src/auth/login.ts
-
-Situation: The codebase required updates to address the recent task requirements.
-Task: Modify src/auth/login.ts to implement the requested changes.
-Action: Updated logic and structures within src/auth/login.ts as per the diff.
-Result: The file now correctly reflects the intended behavior and integrates safely.`,
-    diff: `--- a/src/auth/login.ts
-+++ b/src/auth/login.ts
-@@ -10,6 +10,10 @@ export async function login(req, res) {
-   const { username, password } = req.body;
-   
-   if (!username || !password) {
--    return res.status(400).json({ error: 'Missing credentials' });
-+    return res.status(400).json({ error: 'Missing credentials' });
-+  }
-+  
-+  if (password.length < 8) {
-+    return res.status(400).json({ error: 'Password too short' });
-   }
-   
-   const user = await db.users.find({ username });`,
-    files: ['src/auth/login.ts']
-  },
-  {
-    id: '2',
-    hash: 'e4f5g6h',
-    author: 'The Sentinel',
-    date: '12 mins ago',
-    message: `Update src/db/schema.ts
-
-Situation: The database schema needed to support the new authentication flow.
-Task: Add password length validation to the user schema.
-Action: Modified the user model to enforce a minimum password length of 8 characters.
-Result: The database now rejects users with weak passwords at the schema level.`,
-    diff: `--- a/src/db/schema.ts
-+++ b/src/db/schema.ts
-@@ -25,7 +25,8 @@ export const UserSchema = new Schema({
-   password: {
-     type: String,
-     required: true,
--    select: false
-+    select: false,
-+    minlength: [8, 'Password must be at least 8 characters long']
-   },
-   createdAt: {
-     type: Date,`,
-    files: ['src/db/schema.ts']
-  },
-  {
-    id: '3',
-    hash: 'i7j8k9l',
-    author: 'Human Developer',
-    date: '1 hour ago',
-    message: 'Initial commit for authentication module',
-    diff: `--- /dev/null
-+++ b/src/auth/index.ts
-@@ -0,0 +1,5 @@
-+export * from './login';
-+export * from './register';
-+export * from './logout';`,
-    files: ['src/auth/index.ts']
-  }
-];
+import { motion, AnimatePresence } from 'motion/react';
+import { GitCommit, GitBranch, Terminal, FileCode2, ChevronDown, Check } from 'lucide-react';
+import { Commit } from '../types';
 
 interface GitVisualizerProps {
+  branches: Record<string, Commit[]>;
+  activeBranch: string;
+  setActiveBranch: (branch: string) => void;
   onSelectCommit: (commit: Commit) => void;
 }
 
-export default function GitVisualizer({ onSelectCommit }: GitVisualizerProps) {
+export default function GitVisualizer({ branches, activeBranch, setActiveBranch, onSelectCommit }: GitVisualizerProps) {
   const [activeCommit, setActiveCommit] = useState<string | null>(null);
+  const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
+
+  const commits = branches[activeBranch] || [];
 
   return (
     <div className="flex flex-col h-full bg-[#0a0a0a] overflow-y-auto p-6">
-      <div className="mb-6 flex items-center justify-between">
-        <div className="flex items-center gap-2 text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20">
-          <GitBranch size={16} />
-          <span className="font-mono text-sm">sentinel/task-auth-update-a1b2c3</span>
-        </div>
-        <span className="text-xs text-gray-500 font-mono">3 commits</span>
+      <div className="mb-6 flex items-center justify-between relative">
+        <button 
+          onClick={() => setIsBranchDropdownOpen(!isBranchDropdownOpen)}
+          className="flex items-center gap-2 text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors z-10 max-w-[250px]"
+        >
+          <GitBranch size={16} className="shrink-0" />
+          <span className="font-mono text-sm truncate">{activeBranch}</span>
+          <ChevronDown size={14} className={`shrink-0 transition-transform ${isBranchDropdownOpen ? 'rotate-180' : ''}`} />
+        </button>
+        <span className="text-xs text-gray-500 font-mono shrink-0 ml-2">{commits.length} commits</span>
+
+        <AnimatePresence>
+          {isBranchDropdownOpen && (
+            <motion.div 
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="absolute top-full left-0 mt-2 w-72 bg-[#161616] border border-white/10 rounded-xl shadow-2xl z-20 overflow-hidden"
+            >
+              <div className="p-3 text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-white/5">
+                Switch Branch
+              </div>
+              <div className="max-h-60 overflow-y-auto p-2 space-y-1">
+                {Object.keys(branches).map(branch => (
+                  <button
+                    key={branch}
+                    onClick={() => {
+                      setActiveBranch(branch);
+                      setIsBranchDropdownOpen(false);
+                      setActiveCommit(null);
+                    }}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-mono transition-colors ${
+                      activeBranch === branch ? 'bg-emerald-500/10 text-emerald-400' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'
+                    }`}
+                  >
+                    <span className="truncate text-left">{branch}</span>
+                    {activeBranch === branch && <Check size={14} className="shrink-0 ml-2" />}
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
-      <div className="relative pl-4 border-l-2 border-white/10 space-y-8">
-        {MOCK_COMMITS.map((commit, index) => (
+      {/* Close dropdown when clicking outside */}
+      {isBranchDropdownOpen && (
+        <div 
+          className="fixed inset-0 z-0" 
+          onClick={() => setIsBranchDropdownOpen(false)}
+        />
+      )}
+
+      <div className="relative pl-4 border-l-2 border-white/10 space-y-8 z-0">
+        {commits.length === 0 && (
+          <div className="text-center py-10 text-gray-500 text-sm font-mono border border-dashed border-white/10 rounded-xl -ml-4">
+            No commits yet on this branch.
+          </div>
+        )}
+        {commits.map((commit, index) => (
           <motion.div
             key={commit.id}
             initial={{ opacity: 0, x: -20 }}

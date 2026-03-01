@@ -1,25 +1,29 @@
 import subprocess
 import os
-import json
 import uuid
 from typing import List, Dict, Any, Optional
-import openai
 
-class SentinelGitSkill:
+# Integrating the required Codex SDKs as per hackathon specifications
+from codex.sdk import CodexClient
+from codex.mcp import MCPServer, tool
+from codex.app_server import AppServer
+
+# Initialize the Codex Client for code and text generation
+codex_client = CodexClient()
+
+# Initialize the MCP Server to expose the Git Skill to the AI Agent
+mcp = MCPServer(name="SentinelGitSkill")
+
+class SentinelGitManager:
     """
-    The Sentinel: Git Automation Skill
-    Manages the lifecycle of AI-generated code changes to ensure strict accountability.
+    Core logic for Git operations.
     """
-    def __init__(self, repo_path: str, api_key: Optional[str] = None):
+    def __init__(self, repo_path: str):
         self.repo_path = repo_path
         if not os.path.exists(os.path.join(repo_path, '.git')):
             raise ValueError(f"Not a valid git repository: {repo_path}")
-        
-        # Initialize OpenAI client for Codex/GPT code analysis
-        self.client = openai.OpenAI(api_key=api_key or os.environ.get("OPENAI_API_KEY"))
 
-    def _run_command(self, cmd: List[str]) -> str:
-        """Executes a git command and returns the output."""
+    def run_command(self, cmd: List[str]) -> str:
         try:
             result = subprocess.run(
                 cmd,
@@ -33,29 +37,29 @@ class SentinelGitSkill:
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Git command failed: {' '.join(cmd)}\nError: {e.stderr.strip()}")
 
-    def create_branch(self, task_name: str) -> str:
-        """Creates a logically named, isolated branch for the task."""
-        safe_name = "".join(c if c.isalnum() else "-" for c in task_name).strip("-").lower()
-        branch_name = f"sentinel/task-{safe_name}-{uuid.uuid4().hex[:6]}"
-        
-        self._run_command(["git", "checkout", "-b", branch_name])
-        return branch_name
+# Initialize the Git Manager for the current directory
+git_manager = SentinelGitManager(os.getcwd())
 
-    def get_changed_files(self) -> List[str]:
-        """Gets a list of modified or untracked files."""
-        status_output = self._run_command(["git", "status", "--porcelain"])
-        files = []
-        for line in status_output.splitlines():
-            if line:
-                # porcelain format: XY PATH
-                files.append(line[3:])
-        return files
+@mcp.tool(name="create_isolated_branch", description="Creates a logically named, isolated branch for the task.")
+def create_branch(task_name: str) -> str:
+    safe_name = "".join(c if c.isalnum() else "-" for c in task_name).strip("-").lower()
+    branch_name = f"sentinel/task-{safe_name}-{uuid.uuid4().hex[:6]}"
+    git_manager.run_command(["git", "checkout", "-b", branch_name])
+    return branch_name
 
-    def generate_star_commit_message(self, file_path: str, diff: str) -> str:
-        """
-        Generates a STAR methodology commit message based on the diff using OpenAI/Codex.
-        """
-        prompt = f"""Analyze the following git diff for the file '{file_path}' and generate a commit message strictly using the STAR methodology.
+@mcp.tool(name="get_changed_files", description="Gets a list of modified or untracked files.")
+def get_changed_files() -> List[str]:
+    status_output = git_manager.run_command(["git", "status", "--porcelain"])
+    files = []
+    for line in status_output.splitlines():
+        if line:
+            # porcelain format: XY PATH
+            files.append(line[3:])
+    return files
+
+@mcp.tool(name="generate_commit_message", description="Generates a STAR methodology commit message based on the diff using Codex.")
+def generate_star_commit_message(file_path: str, diff: str) -> str:
+    prompt = f"""Analyze the following git diff for the file '{file_path}' and generate a commit message strictly using the STAR methodology.
 Format your response exactly like this:
 Update {file_path}
 
@@ -67,96 +71,78 @@ Result: [What is the expected outcome or fixed behavior?]
 Diff:
 {diff}
 """
-        try:
-            response = self.client.chat.completions.create(
-                model="gpt-4", # Or the specific codex/reasoning model required by your hackathon
-                messages=[
-                    {"role": "system", "content": "You are an expert software engineer and Git automation agent."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.2,
-                max_tokens=250
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            # Fallback in case of API failure
-            return f"""Update {file_path}
+    try:
+        # Use Codex SDK for generation
+        response = codex_client.generate(
+            prompt=prompt,
+            model="codex-latest", # Target the Codex model
+            temperature=0.2,
+            max_tokens=250
+        )
+        return response.text.strip()
+    except Exception as e:
+        return f"Update {file_path}\n\nSituation: Automated commit processing.\nTask: Update {file_path}.\nAction: Applied diff changes.\nResult: Changes saved successfully.\n\n(Note: Codex generation failed - {str(e)})"
 
-Situation: Automated commit processing.
-Task: Update {file_path}.
-Action: Applied diff changes.
-Result: Changes saved successfully.
+@mcp.tool(name="commit_file_atomically", description="Commits a single file using the STAR methodology.")
+def commit_file(file_path: str) -> Dict[str, str]:
+    git_manager.run_command(["git", "add", file_path])
+    diff = git_manager.run_command(["git", "diff", "--cached", file_path])
+    
+    if not diff:
+        git_manager.run_command(["git", "reset", "HEAD", file_path])
+        return {"file": file_path, "status": "skipped", "reason": "No changes detected"}
 
-(Note: AI generation failed - {str(e)})"""
-
-    def commit_file(self, file_path: str) -> Dict[str, str]:
-        """Commits a single file using the STAR methodology."""
-        self._run_command(["git", "add", file_path])
+    commit_msg = generate_star_commit_message(file_path, diff)
+    
+    msg_file = os.path.join(git_manager.repo_path, ".git", "COMMIT_MSG_TMP")
+    with open(msg_file, "w") as f:
+        f.write(commit_msg)
         
-        # Get the diff for the staged file
-        diff = self._run_command(["git", "diff", "--cached", file_path])
+    try:
+        git_manager.run_command(["git", "commit", "-F", msg_file])
+        commit_hash = git_manager.run_command(["git", "rev-parse", "--short", "HEAD"])
+        return {
+            "file": file_path, 
+            "status": "success", 
+            "commit_hash": commit_hash,
+            "message": commit_msg
+        }
+    finally:
+        if os.path.exists(msg_file):
+            os.remove(msg_file)
+
+@mcp.tool(name="process_task_changes", description="Main workflow to process all changes into atomic commits.")
+def process_task_changes(task_description: str) -> Dict[str, Any]:
+    try:
+        branch_name = create_branch(task_description)
+        changed_files = get_changed_files()
         
-        if not diff:
-            self._run_command(["git", "reset", "HEAD", file_path])
-            return {"file": file_path, "status": "skipped", "reason": "No changes detected"}
-
-        commit_msg = self.generate_star_commit_message(file_path, diff)
+        commits = []
+        for file_path in changed_files:
+            result = commit_file(file_path)
+            if result["status"] == "success":
+                commits.append(result)
+                
+        git_tree = git_manager.run_command(["git", "log", "--graph", "--oneline", "-n", str(len(commits) + 5)])
         
-        # Write commit message to a temporary file to avoid command line escaping issues
-        msg_file = os.path.join(self.repo_path, ".git", "COMMIT_MSG_TMP")
-        with open(msg_file, "w") as f:
-            f.write(commit_msg)
-            
-        try:
-            self._run_command(["git", "commit", "-F", msg_file])
-            commit_hash = self._run_command(["git", "rev-parse", "--short", "HEAD"])
-            return {
-                "file": file_path, 
-                "status": "success", 
-                "commit_hash": commit_hash,
-                "message": commit_msg
-            }
-        finally:
-            if os.path.exists(msg_file):
-                os.remove(msg_file)
+        return {
+            "status": "success",
+            "branch": branch_name,
+            "total_commits": len(commits),
+            "commits": commits,
+            "git_tree": git_tree
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
-    def process_task_changes(self, task_description: str) -> Dict[str, Any]:
-        """
-        Main workflow:
-        1. Create branch
-        2. Identify changes
-        3. Atomically commit each changed file
-        4. Return summary
-        """
-        try:
-            branch_name = self.create_branch(task_description)
-            changed_files = self.get_changed_files()
-            
-            commits = []
-            for file_path in changed_files:
-                result = self.commit_file(file_path)
-                if result["status"] == "success":
-                    commits.append(result)
-                    
-            # Get the git tree representation
-            git_tree = self._run_command(["git", "log", "--graph", "--oneline", "-n", str(len(commits) + 5)])
-            
-            return {
-                "status": "success",
-                "branch": branch_name,
-                "total_commits": len(commits),
-                "commits": commits,
-                "git_tree": git_tree
-            }
-            
-        except Exception as e:
-            return {
-                "status": "error",
-                "message": str(e)
-            }
+# Initialize the App Server to host the MCP and handle requests
+app = AppServer(name="SentinelApp")
+app.attach_mcp(mcp)
 
-# Example usage:
-# if __name__ == "__main__":
-#     skill = SentinelGitSkill("/path/to/repo")
-#     summary = skill.process_task_changes("Implement user authentication")
-#     print(json.dumps(summary, indent=2))
+if __name__ == "__main__":
+    # Start the App Server on the designated port
+    app.start(port=8080)

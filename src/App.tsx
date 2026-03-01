@@ -1,20 +1,56 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { GitBranch, MessageSquare, Code2, Terminal, ShieldAlert } from 'lucide-react';
 import ChatBox from './components/ChatBox';
 import GitVisualizer from './components/GitVisualizer';
 import CodeEditor from './components/CodeEditor';
+import { Message, Commit } from './types';
+import { INITIAL_MESSAGES, INITIAL_BRANCHES } from './data';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'chat' | 'git'>('chat');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const [selectedCommit, setSelectedCommit] = useState<any | null>(null);
+  const [selectedCommit, setSelectedCommit] = useState<Commit | null>(null);
 
-  const handleSelectCommit = (commit: any) => {
+  const [messages, setMessages] = useState<Message[]>(() => {
+    const saved = localStorage.getItem('sentinel_messages');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return INITIAL_MESSAGES;
+  });
+
+  const [branches, setBranches] = useState<Record<string, Commit[]>>(() => {
+    const saved = localStorage.getItem('sentinel_branches');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return INITIAL_BRANCHES;
+  });
+
+  const [activeBranch, setActiveBranch] = useState<string>('sentinel/task-auth-update-a1b2c3');
+
+  useEffect(() => {
+    localStorage.setItem('sentinel_messages', JSON.stringify(messages));
+  }, [messages]);
+
+  useEffect(() => {
+    localStorage.setItem('sentinel_branches', JSON.stringify(branches));
+  }, [branches]);
+
+  const handleSelectCommit = (commit: Commit) => {
     setSelectedCommit(commit);
     if (commit.files && commit.files.length > 0) {
       setSelectedFile(commit.files[0]);
     }
+  };
+
+  const handleBranchCreated = (branchName: string) => {
+    setBranches(prev => ({
+      ...prev,
+      [branchName]: []
+    }));
+    setActiveBranch(branchName);
   };
 
   return (
@@ -48,9 +84,18 @@ export default function App() {
         {/* Content Area */}
         <div className="flex-1 overflow-hidden relative">
           {activeTab === 'chat' ? (
-            <ChatBox />
+            <ChatBox 
+              messages={messages} 
+              setMessages={setMessages} 
+              onBranchCreated={handleBranchCreated} 
+            />
           ) : (
-            <GitVisualizer onSelectCommit={handleSelectCommit} />
+            <GitVisualizer 
+              branches={branches}
+              activeBranch={activeBranch}
+              setActiveBranch={setActiveBranch}
+              onSelectCommit={handleSelectCommit} 
+            />
           )}
         </div>
       </div>
