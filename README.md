@@ -4,7 +4,7 @@ The Sentinel is a safe, human-governed AI coding agent that acts as a contributo
 
 Project Demo Video: [Add video link here](https://example.com/demo)
 
-## 1. The Hook & Innovations
+## 1. Innovations
 
 - **Agent-as-Contributor:** The AI does not blindly overwrite files; it works in isolated branches and proposes atomic commits that humans can review before merge.
 - **Git-Integrated Governance:** The app includes a visual Git tree so humans can inspect diffs, revert commits, check out history safely, and explicitly approve/reject AI branches.
@@ -165,7 +165,7 @@ npm run dev
 
 5. If still failing, confirm your API key has active billing/access in your OpenAI project and regenerate a new key.
 
-## 5. How to Test / Evaluate (The Golden Path)
+## 5. How to Test / Evaluate
 
 Judges are recommended to use the built-in in-app testing flow first.
 
@@ -191,9 +191,9 @@ Test resources:
 - [`testbench/scripts/test_cases.md`](/Users/cirnovsky/repos/dlweek/TheSentinel/testbench/scripts/test_cases.md)
 - [`testbench/scripts/ui_test_resources.json`](/Users/cirnovsky/repos/dlweek/TheSentinel/testbench/scripts/ui_test_resources.json)
 
-## 6. Run The Test Blog Directly (Optional)
+## 6. Run The Test Blog (Optional but Recommended)
 
-If you want to run only the mini blog project used by the testbench:
+If you want to run the mini blog project, used by the testbench:
 
 ### macOS / Linux
 
@@ -225,3 +225,4 @@ Blog URL:
 Notes:
 - This runs the blog app only.
 - Sentinel chat/governance UI runs from the root app at `http://localhost:3000`.
+- You can check out the changes done to the project.
