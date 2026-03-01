@@ -1,21 +1,6 @@
 import { useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, PlayCircle, ShieldAlert } from 'lucide-react';
+import { ChevronDown, ShieldAlert } from 'lucide-react';
 import testResourcesRaw from '../../testbench/scripts/ui_test_resources.json?raw';
-
-type MCPReport = {
-  target_system: string;
-  risk_level: 'LOW' | 'CRITICAL';
-  requires_human_consent: boolean;
-  rollback_available: boolean;
-  halt_execution: boolean;
-  justification: string;
-  execution_plan: string[];
-};
-
-type GitReport = {
-  status: 'BLOCKED' | 'ALLOWED';
-  justification: string;
-};
 
 type TestCase = {
   id: string;
@@ -28,107 +13,47 @@ type TestCase = {
   expected_report: Record<string, unknown>;
 };
 
-type TestResult = {
-  id: string;
-  passed: boolean;
-  report: MCPReport | GitReport;
+type LoadState = {
+  scenarioId: string;
+  loading: boolean;
+  error: string;
 };
 
-function runMcpGuard(command: string): MCPReport {
-  const normalized = command.toLowerCase();
-
-  const environmentWipe = /rm\s+-r[fF]?\s+.*\b(venv|\.git|node_modules)\/?\b/i.test(command);
-  if (environmentWipe) {
-    return {
-      target_system: 'Developer Environment',
-      risk_level: 'CRITICAL',
-      requires_human_consent: true,
-      rollback_available: false,
-      halt_execution: true,
-      justification: 'Recursive deletion targets core infrastructure folders.',
-      execution_plan: [
-        `Analyze command: ${command}`,
-        'Critical delete operation detected for venv/.git/node_modules.',
-      ],
-    };
-  }
-
-  const dataWipe =
-    /rm\s+-r[fF]?\s+.*testbench\/blog\/database\/posts/i.test(command) ||
-    (normalized.includes('delete') && normalized.includes('testbench/blog/database/posts'));
-
-  if (dataWipe) {
-    return {
-      target_system: 'Local File Storage',
-      risk_level: 'CRITICAL',
-      requires_human_consent: true,
-      rollback_available: false,
-      halt_execution: true,
-      justification: 'Deletion operation targets blog posts storage.',
-      execution_plan: [
-        `Analyze command: ${command}`,
-        'Destructive post deletion detected. Human approval required.',
-      ],
-    };
-  }
-
-  return {
-    target_system: 'Shell/OS',
-    risk_level: 'LOW',
-    requires_human_consent: false,
-    rollback_available: true,
-    halt_execution: false,
-    justification: 'No destructive pattern detected.',
-    execution_plan: [`Analyze command: ${command}`],
-  };
+interface TestPageProps {
+  onLoadScenario: (prompt: string) => Promise<void>;
 }
 
-function runGitGuard(diff: string): GitReport {
-  const secretPattern =
-    /\+(?:\s*)?(db_pass|db_password|password|secret|api_key|token)\s*[:=]\s*['\"][^'\"]+['\"]/i;
-  const sensitiveFile = /\+\+\+ b\/(config\.py|\.env)/i.test(diff);
-
-  if (sensitiveFile && secretPattern.test(diff)) {
-    return {
-      status: 'BLOCKED',
-      justification:
-        'Hardcoded credential detected in config.py/.env diff. Use environment variables instead.',
-    };
+function scenarioThreat(testCase: TestCase): string {
+  if (testCase.id === 'data_wipe') {
+    return 'Unchecked delete operations can wipe historical content and permanently erase local blog data.';
   }
-
-  return {
-    status: 'ALLOWED',
-    justification: 'No hardcoded secrets detected in staged diff.',
-  };
+  if (testCase.id === 'environment_wipe') {
+    return 'Recursive deletes against environment folders can break the repository and development setup irreversibly.';
+  }
+  if (testCase.id === 'secret_exposure') {
+    return 'Committing plaintext credentials leaks secrets into git history and risks production compromise.';
+  }
+  return 'This scenario validates Sentinel safeguards against high-impact coding-agent actions.';
 }
 
-function reportMatchesExpectation(
-  report: MCPReport | GitReport,
-  expectedReport: Record<string, unknown>,
-): boolean {
-  return Object.entries(expectedReport).every(([key, expectedValue]) => {
-    return (report as Record<string, unknown>)[key] === expectedValue;
-  });
-}
-
-export default function TestPage() {
+export default function TestPage({ onLoadScenario }: TestPageProps) {
   const testCases = useMemo(() => JSON.parse(testResourcesRaw) as TestCase[], []);
-  const [activeResult, setActiveResult] = useState<TestResult | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(testCases[0]?.id ?? null);
+  const [loadState, setLoadState] = useState<LoadState | null>(null);
 
-  const runCase = (testCase: TestCase) => {
-    const report =
-      testCase.runner === 'mcp'
-        ? runMcpGuard(testCase.proposed_command ?? '')
-        : runGitGuard(testCase.proposed_diff ?? '');
-
-    setActiveResult({
-      id: testCase.id,
-      passed: reportMatchesExpectation(report, testCase.expected_report),
-      report,
-    });
+  const handleLoadScenario = async (testCase: TestCase) => {
+    setLoadState({ scenarioId: testCase.id, loading: true, error: '' });
+    try {
+      await onLoadScenario(testCase.user_prompt);
+      setLoadState(null);
+    } catch (error) {
+      setLoadState({
+        scenarioId: testCase.id,
+        loading: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   };
-
-  const activeCase = testCases.find((item) => item.id === activeResult?.id) ?? null;
 
   return (
     <div className="h-full overflow-y-auto bg-[#0a0a0a] p-6">
@@ -137,64 +62,67 @@ export default function TestPage() {
           <ShieldAlert size={14} />
           Sentinel Test Page
         </div>
-        <h2 className="mt-3 text-2xl font-semibold text-white">Run Safety Scenarios</h2>
+        <h2 className="mt-3 text-2xl font-semibold text-white">Guided Demo Scenarios</h2>
         <p className="mt-1 text-sm text-gray-400">
-          Prompts and expected behavior are loaded from files under <code>testbench/scripts</code>.
+          Load a scenario to reset sandbox state, return to chat, and prefill the malicious prompt for one-click execution.
         </p>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-3">
-        {testCases.map((testCase) => (
-          <button
-            key={testCase.id}
-            onClick={() => runCase(testCase)}
-            className="rounded-xl border border-white/10 bg-[#161616] p-4 text-left transition-colors hover:border-emerald-500/40 hover:bg-[#1a1a1a]"
-          >
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm font-medium text-white">{testCase.title}</span>
-              <PlayCircle size={16} className="text-emerald-400" />
+      <div className="space-y-3">
+        {testCases.map((testCase) => {
+          const expanded = expandedId === testCase.id;
+          const isLoading = loadState?.scenarioId === testCase.id && loadState.loading;
+          const loadError = loadState?.scenarioId === testCase.id ? loadState.error : '';
+
+          return (
+            <div key={testCase.id} className="overflow-hidden rounded-xl border border-white/10 bg-[#161616]">
+              <button
+                onClick={() => setExpandedId(expanded ? null : testCase.id)}
+                className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-[#1a1a1a]"
+              >
+                <span className="text-sm font-medium text-white">{testCase.title}</span>
+                <ChevronDown
+                  size={16}
+                  className={`text-emerald-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
+                />
+              </button>
+
+              {expanded && (
+                <div className="space-y-4 border-t border-white/10 bg-[#121212] px-4 py-4 text-sm">
+                  <div>
+                    <div className="mb-1 text-xs uppercase tracking-wider text-gray-500">The Threat</div>
+                    <div className="rounded-lg border border-white/10 bg-black/30 p-3 text-gray-200">
+                      {scenarioThreat(testCase)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs uppercase tracking-wider text-gray-500">The Prompt</div>
+                    <div className="rounded-lg border border-white/10 bg-black/30 p-3 text-gray-200">
+                      {testCase.user_prompt}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs uppercase tracking-wider text-gray-500">Expected Behavior</div>
+                    <div className="rounded-lg border border-white/10 bg-black/30 p-3 text-gray-200">
+                      {testCase.expected_behavior}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <button
+                      onClick={() => handleLoadScenario(testCase)}
+                      disabled={isLoading}
+                      className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-emerald-300 transition-colors hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isLoading ? 'Loading Scenario...' : 'Load Scenario'}
+                    </button>
+                    {loadError ? <span className="text-xs text-rose-400">{loadError}</span> : null}
+                  </div>
+                </div>
+              )}
             </div>
-            <p className="text-xs text-gray-400 line-clamp-4">{testCase.user_prompt}</p>
-          </button>
-        ))}
+          );
+        })}
       </div>
-
-      {activeCase && activeResult && (
-        <div className="mt-6 rounded-xl border border-white/10 bg-[#121212] p-5">
-          <div className="mb-4 flex items-center gap-2">
-            {activeResult.passed ? (
-              <CheckCircle2 size={18} className="text-emerald-400" />
-            ) : (
-              <AlertTriangle size={18} className="text-rose-400" />
-            )}
-            <span className={`text-sm font-semibold ${activeResult.passed ? 'text-emerald-300' : 'text-rose-300'}`}>
-              {activeResult.passed ? 'PASS' : 'FAIL'}
-            </span>
-            <span className="text-sm text-gray-300">{activeCase.title}</span>
-          </div>
-
-          <div className="space-y-4 text-sm">
-            <div>
-              <div className="mb-1 text-xs uppercase tracking-wider text-gray-500">User Prompt</div>
-              <div className="rounded-lg border border-white/10 bg-black/30 p-3 text-gray-200">
-                {activeCase.user_prompt}
-              </div>
-            </div>
-            <div>
-              <div className="mb-1 text-xs uppercase tracking-wider text-gray-500">Expected Behavior</div>
-              <div className="rounded-lg border border-white/10 bg-black/30 p-3 text-gray-200">
-                {activeCase.expected_behavior}
-              </div>
-            </div>
-            <div>
-              <div className="mb-1 text-xs uppercase tracking-wider text-gray-500">Actual JSON Report</div>
-              <pre className="overflow-x-auto rounded-lg border border-white/10 bg-black/40 p-3 text-xs text-gray-200">
-                {JSON.stringify(activeResult.report, null, 2)}
-              </pre>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

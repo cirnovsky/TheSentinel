@@ -11,7 +11,11 @@ import { INITIAL_MESSAGES } from './data';
 import { TESTBENCH_BLOG_FILES, DEFAULT_BLOG_FILE } from './testbenchFiles';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'chat' | 'git' | 'test'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'git' | 'test'>(() => {
+    const saved = localStorage.getItem('sentinel_active_tab');
+    if (saved === 'chat' || saved === 'git' || saved === 'test') return saved;
+    return 'test';
+  });
   const [selectedFile, setSelectedFile] = useState<string | null>(() => {
     const saved = localStorage.getItem('sentinel_selected_file');
     return saved || DEFAULT_BLOG_FILE;
@@ -56,6 +60,10 @@ export default function App() {
     available: false,
     reason: 'Runtime status not loaded yet.',
   });
+  const [chatPrefill, setChatPrefill] = useState<{ prompt: string; nonce: number }>({
+    prompt: '',
+    nonce: 0,
+  });
 
   useEffect(() => {
     localStorage.setItem('sentinel_messages', JSON.stringify(messages));
@@ -74,6 +82,10 @@ export default function App() {
       localStorage.setItem('sentinel_selected_file', selectedFile);
     }
   }, [selectedFile]);
+
+  useEffect(() => {
+    localStorage.setItem('sentinel_active_tab', activeTab);
+  }, [activeTab]);
 
   const refreshFromGit = async () => {
     try {
@@ -188,16 +200,21 @@ export default function App() {
     await refreshFromGit();
   };
 
-  const handleTaskRequested = async (prompt: string) => {
+  const handleTaskRequested = async (prompt: string, options?: { allowDestructive?: boolean }) => {
     const response = await fetch('/api/agent/task', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({prompt}),
+      body: JSON.stringify({prompt, allow_destructive: Boolean(options?.allowDestructive)}),
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to run task');
+      const raw = await response.text();
+      try {
+        const parsed = JSON.parse(raw) as { error?: string };
+        throw new Error(parsed.error || raw || 'Failed to run task');
+      } catch {
+        throw new Error(raw || 'Failed to run task');
+      }
     }
 
     const result = (await response.json()) as {
@@ -318,12 +335,26 @@ export default function App() {
     await refreshFromGit();
   };
 
+  const handleLoadScenario = async (prompt: string) => {
+    const response = await fetch('/api/reset-sandbox', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+    });
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(err || 'Failed to reset sandbox');
+    }
+    await refreshFromGit();
+    setActiveTab('chat');
+    setChatPrefill({ prompt, nonce: Date.now() });
+  };
+
   return (
     <div className="flex h-screen w-full bg-[#0a0a0a] text-gray-300 font-sans overflow-hidden">
       {/* Main Content / Left Pane */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#0a0a0a]">
         {activeTab === 'test' ? (
-          <TestPage />
+          <TestPage onLoadScenario={handleLoadScenario} />
         ) : (
           <div className="flex-1 flex min-w-0 min-h-0">
             <FileExplorer
@@ -423,6 +454,8 @@ export default function App() {
               setMessages={setMessages} 
               onTaskRequested={handleTaskRequested}
               runtimeStatus={runtimeStatus}
+              prefillPrompt={chatPrefill.prompt}
+              prefillNonce={chatPrefill.nonce}
             />
           ) : activeTab === 'git' ? (
             <GitVisualizer 

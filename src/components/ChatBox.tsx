@@ -16,18 +16,32 @@ import { Message, RuntimeStatus } from '../types';
 interface ChatBoxProps {
   messages: Message[];
   setMessages: Dispatch<SetStateAction<Message[]>>;
-  onTaskRequested: (prompt: string) => Promise<{
+  onTaskRequested: (prompt: string, options?: { allowDestructive?: boolean }) => Promise<{
     branchName: string;
     totalCommits: number;
     gitTree: string;
   }>;
   runtimeStatus: RuntimeStatus;
+  prefillPrompt?: string;
+  prefillNonce?: number;
 }
 
-export default function ChatBox({ messages, setMessages, onTaskRequested, runtimeStatus }: ChatBoxProps) {
+type PendingAction =
+  | { kind: 'task_destructive'; prompt: string }
+  | { kind: 'command_mock'; prompt: string };
+
+export default function ChatBox({
+  messages,
+  setMessages,
+  onTaskRequested,
+  runtimeStatus,
+  prefillPrompt,
+  prefillNonce,
+}: ChatBoxProps) {
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [pendingConsent, setPendingConsent] = useState<boolean>(false);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -37,6 +51,48 @@ export default function ChatBox({ messages, setMessages, onTaskRequested, runtim
   useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping]);
+
+  const buildMcpBlockedAssessment = (errorText: string) => {
+    const isSecretExposure = errorText.toLowerCase().includes('secret exposure');
+    const filesMatch = errorText.match(/\(([^)]+)\)\s*$/);
+    const files = filesMatch?.[1]
+      ? filesMatch[1].split(',').map((v) => v.trim()).filter(Boolean)
+      : [];
+
+    if (isSecretExposure) {
+      return {
+        target_system: 'Git Diff / Secrets',
+        execution_plan: [
+          'Analyze prompt intent for credential handling.',
+          'Detected request to hardcode secrets in config/.env.',
+          'Blocking commit path and requiring environment-variable based secret management.',
+        ],
+        rollback_available: false,
+        risk_level: 'Critical',
+        justification: 'Blocked by Sentinel MCP: plaintext credential exposure detected.',
+        environment: 'production',
+      };
+    }
+
+    return {
+      target_system: 'Local File Storage',
+      execution_plan: [
+        'Analyze command intent from user prompt.',
+        'Detected destructive delete operations targeting blog post storage.',
+        ...(files.length > 0 ? [`Targets: ${files.slice(0, 6).join(', ')}${files.length > 6 ? ' ...' : ''}`] : []),
+      ],
+      rollback_available: false,
+      risk_level: 'Critical',
+      justification: 'Blocked by Sentinel MCP: destructive deletion requires explicit human consent.',
+      environment: 'production',
+    };
+  };
+
+  useEffect(() => {
+    if (prefillPrompt && prefillPrompt.trim()) {
+      setInput(prefillPrompt);
+    }
+  }, [prefillPrompt, prefillNonce]);
 
   const handleSend = () => {
     const inputText = input.trim();
@@ -93,6 +149,7 @@ export default function ChatBox({ messages, setMessages, onTaskRequested, runtim
           resolved: false,
         };
         setPendingConsent(true);
+        setPendingAction({ kind: 'command_mock', prompt: inputText });
       } else {
         try {
           const taskRun = await onTaskRequested(inputText);
@@ -113,10 +170,31 @@ export default function ChatBox({ messages, setMessages, onTaskRequested, runtim
             timestamp: new Date().toISOString(),
           };
         } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          const isMcpBlocked = errorMessage.includes('Blocked by Sentinel MCP');
+          if (isMcpBlocked) {
+            const isSecretExposure = errorMessage.toLowerCase().includes('secret exposure');
+            agentMessage = {
+              id: (Date.now() + 1).toString(),
+              role: 'agent',
+              content: isSecretExposure
+                ? 'I intercepted this request through Sentinel MCP. This is a credential exposure attempt and is blocked.'
+                : 'I intercepted this request through Sentinel MCP. The action is high-risk and requires explicit approval before execution.',
+              timestamp: new Date().toISOString(),
+              assessment: buildMcpBlockedAssessment(errorMessage),
+              resolved: isSecretExposure,
+            };
+            setPendingConsent(!isSecretExposure);
+            setPendingAction(isSecretExposure ? null : { kind: 'task_destructive', prompt: inputText });
+            setMessages((prev) => [...prev, agentMessage]);
+            setIsTyping(false);
+            return;
+          }
+
           agentMessage = {
             id: (Date.now() + 1).toString(),
             role: 'agent',
-            content: `I could not execute the task with real Git operations.\n\nError:\n\`${error instanceof Error ? error.message : String(error)}\``,
+            content: `I could not execute the task with real Git operations.\n\nError:\n\`${errorMessage}\``,
             timestamp: new Date().toISOString(),
           };
         }
@@ -127,7 +205,7 @@ export default function ChatBox({ messages, setMessages, onTaskRequested, runtim
     }, 1500);
   };
 
-  const handleConsentAction = (messageId: string, action: 'approve' | 'reject') => {
+  const handleConsentAction = async (messageId: string, action: 'approve' | 'reject') => {
     setMessages((prev) =>
       prev.map((msg) => (msg.id === messageId ? { ...msg, resolved: true } : msg)),
     );
@@ -144,6 +222,61 @@ export default function ChatBox({ messages, setMessages, onTaskRequested, runtim
     };
 
     setMessages((prev) => [...prev, systemMessage]);
+
+    if (action === 'reject') {
+      setPendingAction(null);
+      return;
+    }
+
+    if (!pendingAction) return;
+
+    if (pendingAction.kind === 'command_mock') {
+      const doneMessage: Message = {
+        id: `${Date.now()}-done`,
+        role: 'system',
+        content: 'Action Completed: Mock execution finished (demo mode).',
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, doneMessage]);
+      setPendingAction(null);
+      return;
+    }
+
+    if (pendingAction.kind === 'task_destructive') {
+      setIsTyping(true);
+      try {
+        const taskRun = await onTaskRequested(pendingAction.prompt, { allowDestructive: true });
+        const summaryJson = JSON.stringify(
+          {
+            branch: taskRun.branchName,
+            total_commits: taskRun.totalCommits,
+            git_tree: taskRun.gitTree,
+          },
+          null,
+          2,
+        );
+
+        const agentMessage: Message = {
+          id: `${Date.now()}-approved-run`,
+          role: 'agent',
+          content: `Approved action executed.\n\nBranch:\n\`${taskRun.branchName}\`\n\nStructured output:\n\`\`\`json\n${summaryJson}\n\`\`\``,
+          timestamp: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, agentMessage]);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const failedMessage: Message = {
+          id: `${Date.now()}-approved-failed`,
+          role: 'agent',
+          content: `Approved action failed.\n\nError:\n\`${errorMessage}\``,
+          timestamp: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, failedMessage]);
+      } finally {
+        setPendingAction(null);
+        setIsTyping(false);
+      }
+    }
   };
 
   const renderAssessment = (msg: Message) => {

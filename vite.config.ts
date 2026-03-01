@@ -11,6 +11,7 @@ import {
   getGitState,
   mergeBranch,
   readBlogWorkspaceFiles,
+  resetSandbox,
   returnToBranchHead,
   revertCommit,
   runAgentTask,
@@ -80,6 +81,7 @@ function sentinelApiPlugin(): Plugin {
         const raw = await readBody(req);
         const body = raw ? JSON.parse(raw) : {};
         const prompt = String(body.prompt || '').trim();
+        const allowDestructive = Boolean(body.allow_destructive);
         if (!prompt) {
           res.statusCode = 400;
           res.setHeader('Content-Type', 'application/json');
@@ -87,7 +89,7 @@ function sentinelApiPlugin(): Plugin {
           return;
         }
 
-        const result = runAgentTask(prompt);
+        const result = runAgentTask(prompt, allowDestructive);
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify(result));
@@ -95,6 +97,25 @@ function sentinelApiPlugin(): Plugin {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify({error: String(error)}));
+      }
+    });
+
+    middlewares.use('/api/reset-sandbox', async (req, res) => {
+      if (req.method !== 'POST') {
+        res.statusCode = 405;
+        res.end('Method Not Allowed');
+        return;
+      }
+
+      try {
+        const result = resetSandbox();
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify(result));
+      } catch (error) {
+        res.statusCode = 500;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: String(error) }));
       }
     });
 

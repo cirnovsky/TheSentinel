@@ -1,7 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import { execFileSync } from 'child_process';
-import { generateStarCommitMessageWithCodex } from './codexBridge';
+import {
+  generateFileContentWithCodex,
+  generateStarCommitMessageWithCodex,
+  generateTaskOperationsWithCodex,
+  getLastPlannerError,
+} from './codexBridge';
 
 type Operation = {
   relPath: string;
@@ -39,9 +44,14 @@ export type AgentTaskResponse = {
 
 const ROOT_DIR = process.cwd();
 const BLOG_DIR = path.resolve(ROOT_DIR, 'testbench/blog');
-const POSTS_DIR = path.resolve(BLOG_DIR, 'database/posts');
-const DEFAULT_DATE = '2026-03-01';
 const SIGNED_OFF_BY = 'Signed-off-by: The Sentinel App <sentinel@local>';
+const PROTECTED_PATHS = new Set(['.git', 'node_modules', 'dist']);
+const PROTECTED_PREFIXES = ['.git/', 'node_modules/', 'dist/'];
+const SECRET_PATH_PATTERNS = [
+  /^\.env(\..+)?$/i,
+  /(^|\/)\.env(\..+)?$/i,
+  /(^|\/)(secrets?|credentials?)\.(txt|json|ya?ml|env)$/i,
+];
 const SCAFFOLD_FILES = [
   'index.html',
   'package.json',
@@ -210,300 +220,88 @@ function buildBranchName(prompt: string): string {
   return `sentinel/task-${slug}-${makeHash(prompt + Date.now().toString()).slice(0, 6)}`;
 }
 
-function titleToSlug(title: string): string {
-  return title.toLowerCase().replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-');
-}
-
-function extractQuotedTitle(prompt: string): string | null {
-  const titled = prompt.match(/titled?\s*[:\-]?\s*["']([^"']+)["']/i);
-  if (titled?.[1]) return titled[1].trim();
-
-  const parts = [...prompt.matchAll(/["']([^"']+)["']/g)].map((m) => m[1].trim()).filter(Boolean);
-  if (parts.length > 0) return parts.sort((a, b) => b.length - a.length)[0];
-  return null;
-}
-
-function nextPostNumber(): number {
-  const files = fs.readdirSync(POSTS_DIR).filter((n) => n.endsWith('.md'));
-  const nums = files.map((n) => n.match(/^(\d+)-/)?.[1]).filter(Boolean).map((n) => Number(n));
-  return nums.length ? Math.max(...nums) + 1 : 1;
-}
-
-function createPostContent(id: string, title: string): string {
-  return `---\nid: ${id}\ntitle: ${title}\nauthor: The Sentinel\npublishedAt: ${DEFAULT_DATE}\ntags: update, agent\n---\nThis post was created automatically from an agent task request.\n\nUse this entry to verify branch, commit, and STAR message workflows.\n`;
-}
-
-function createTimelinePostContent(id: string, title: string, year: number): string {
-  return `---\nid: ${id}\ntitle: ${title}\nauthor: The Sentinel\npublishedAt: ${year}-01-15\ntags: timeline, generated\n---\nThis timeline entry covers year ${year} for the generated blog post sequence.\n\nIt was created automatically from a range-based task request and is intended for deterministic testing.\n`;
-}
-
-function appendTaskLog(oldContent: string, prompt: string): string {
-  const marker = '## Task Log';
-  const entry = `- ${DEFAULT_DATE}: ${prompt}`;
-  if (oldContent.includes(marker)) return `${oldContent.trimEnd()}\n${entry}\n`;
-  return `${oldContent.trimEnd()}\n\n${marker}\n\n${entry}\n`;
-}
-
-function buildThemeEnabledAppJsx(current: string): string {
-  if (current.includes('theme-toggle')) return current;
-
-  let next = current;
-  next = next.replace(
-    "import { useMemo, useState } from 'react';",
-    "import { useEffect, useMemo, useState } from 'react';",
-  );
-
-  next = next.replace(
-    '  const [selectedPostId, setSelectedPostId] = useState(posts[0]?.id ?? null);\n\n  const selectedPost = posts.find((post) => post.id === selectedPostId) ?? null;\n',
-    "  const [selectedPostId, setSelectedPostId] = useState(posts[0]?.id ?? null);\n  const [theme, setTheme] = useState(() => localStorage.getItem('blog-theme') || 'light');\n\n  useEffect(() => {\n    document.documentElement.setAttribute('data-theme', theme);\n    localStorage.setItem('blog-theme', theme);\n  }, [theme]);\n\n  const selectedPost = posts.find((post) => post.id === selectedPostId) ?? null;\n",
-  );
-
-  next = next.replace(
-    '      <header className="header">\n        <h1>Mini Blog Testbench</h1>\n        <p>Simple React blog for agent testing.</p>\n      </header>\n',
-    '      <header className="header">\n        <div className="header-top">\n          <div>\n            <h1>Mini Blog Testbench</h1>\n            <p>Simple React blog for agent testing.</p>\n          </div>\n          <button\n            type="button"\n            className="theme-toggle"\n            onClick={() => setTheme((prev) => (prev === \'dark\' ? \'light\' : \'dark\'))}\n          >\n            {theme === \'dark\' ? \'Switch to Light\' : \'Switch to Dark\'}\n          </button>\n        </div>\n      </header>\n',
-  );
-
-  return next;
-}
-
-function buildThemeEnabledStylesCss(current: string): string {
-  let next = current;
-  const rootBlock = [
-    ':root {',
-    '  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;',
-    '  --bg: #f8fafc;',
-    '  --text: #1f2937;',
-    '  --muted: #4b5563;',
-    '  --panel: #ffffff;',
-    '  --border: #e5e7eb;',
-    '  --active-bg: #eff6ff;',
-    '  --active-border: #2563eb;',
-    '  --button-bg: #111827;',
-    '  --button-text: #f9fafb;',
-    '  color: var(--text);',
-    '  background: var(--bg);',
-    '}',
-    '',
-    '[data-theme="dark"] {',
-    '  --bg: #0b1220;',
-    '  --text: #e5e7eb;',
-    '  --muted: #9ca3af;',
-    '  --panel: #111827;',
-    '  --border: #374151;',
-    '  --active-bg: #1f2937;',
-    '  --active-border: #60a5fa;',
-    '  --button-bg: #f9fafb;',
-    '  --button-text: #111827;',
-    '}',
-  ].join('\n');
-
-  next = next.replace(
-    /:root\s*\{[\s\S]*?\}/,
-    rootBlock,
-  );
-
-  next = next.replace('  margin: 0;\n', '  margin: 0;\n  background: var(--bg);\n  color: var(--text);\n');
-  next = next.replace('.header {\n  margin-bottom: 20px;\n}\n', '.header {\n  margin-bottom: 20px;\n}\n\n.header-top {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 12px;\n}\n');
-  if (!next.includes('.theme-toggle {')) {
-    next += '\n.theme-toggle {\n  border: 1px solid var(--border);\n  background: var(--button-bg);\n  color: var(--button-text);\n  border-radius: 8px;\n  padding: 8px 12px;\n  cursor: pointer;\n}\n\n.theme-toggle:hover {\n  opacity: 0.9;\n}\n';
-  }
-  next = next.replace('  color: #4b5563;\n', '  color: var(--muted);\n');
-  next = next.replace('  background: #ffffff;\n', '  background: var(--panel);\n');
-  next = next.replace('  border: 1px solid #e5e7eb;\n', '  border: 1px solid var(--border);\n');
-  next = next.replace('  background: #ffffff;\n', '  background: var(--panel);\n');
-  next = next.replace('  border: 1px solid #e5e7eb;\n', '  border: 1px solid var(--border);\n');
-  next = next.replace('  border-color: #2563eb;\n  background: #eff6ff;\n', '  border-color: var(--active-border);\n  background: var(--active-bg);\n');
-  next = next.replace('  color: #6b7280;\n', '  color: var(--muted);\n');
-  return next;
-}
-
-function splitFrontMatter(markdown: string): { frontMatter: string; body: string } {
-  const match = markdown.match(/^---\n([\s\S]*?)\n---\n?/);
-  if (!match) return { frontMatter: '', body: markdown.trim() };
-  return { frontMatter: match[1].trim(), body: markdown.slice(match[0].length).trim() };
-}
-
-function buildPostBodyFromPrompt(prompt: string): string {
-  const lower = prompt.toLowerCase();
-  if (lower.includes('taylor swift')) {
-    return [
-      'The story follows a songwriter who keeps turning heartbreak into melodies and courage.',
-      'Each chapter moves from quiet small-town dreams to bright stadium nights, where love feels huge and fragile at the same time.',
-      'She meets different partners, learns from each relationship, and writes with honesty about longing, growth, and choosing herself.',
-      'In the end, the post frames love as an evolving journey: part fairy tale, part hard lesson, and always transformed into art.',
-    ].join('\n\n');
-  }
-
-  if (lower.includes('random content')) {
-    return [
-      'A chance meeting at a train platform started this chapter with surprise and laughter.',
-      'From there, the story wandered through late-night calls, weekend trips, and honest conversations.',
-      'What mattered most was not the perfect ending, but the way both people grew through the experience.',
-    ].join('\n\n');
-  }
-
-  return [
-    'This post was edited by The Sentinel according to the task request.',
-    'The body content has been replaced so the requested narrative is now reflected directly in the markdown file.',
-  ].join('\n\n');
-}
-
-function resolvePostFileFromPrompt(prompt: string): string | null {
-  const explicit = prompt.match(/([0-9]{3}-[a-z0-9-]+\.md)/i)?.[1];
-  if (explicit) return `database/posts/${explicit}`;
-
-  const titled = extractQuotedTitle(prompt);
-  if (!titled) return null;
-
-  const slug = titleToSlug(titled);
-  const candidate = fs.readdirSync(POSTS_DIR).find((n) => n.endsWith('.md') && n.toLowerCase().includes(slug));
-  return candidate ? `database/posts/${candidate}` : null;
-}
-
 function readIfExists(fullPath: string): string {
   if (!fs.existsSync(fullPath)) return '';
   return fs.readFileSync(fullPath, 'utf-8');
 }
 
-function parseRangePrompt(promptLower: string): { start: number; end: number; yearFrom: number; yearTo: number } | null {
-  const postRange = promptLower.match(/posts?\s+(\d{1,3})\s*(?:to|-|through)\s*(\d{1,3})/);
-  const yearRange = promptLower.match(/(?:time|year|years?)\s*(?:from)?\s*(\d{4})\s*(?:to|-|through)\s*(\d{4})/);
-  if (!postRange || !yearRange) return null;
+function buildPlanningContext(): Record<string, string> {
+  const files = readBlogWorkspaceFiles();
+  const entries = Object.entries(files)
+    .filter(([filePath]) => filePath.startsWith('testbench/blog/'))
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .slice(0, 80);
 
-  const start = Number(postRange[1]);
-  const end = Number(postRange[2]);
-  const yearFrom = Number(yearRange[1]);
-  const yearTo = Number(yearRange[2]);
+  const context: Record<string, string> = {};
+  for (const [filePath, content] of entries) {
+    const relPath = filePath.replace('testbench/blog/', '');
+    context[relPath] = content.length > 700 ? `${content.slice(0, 700)}\n...` : content;
+  }
+  return context;
+}
 
-  if (Number.isNaN(start) || Number.isNaN(end) || Number.isNaN(yearFrom) || Number.isNaN(yearTo)) return null;
-  if (end < start || yearTo < yearFrom) return null;
-  return { start, end, yearFrom, yearTo };
+function normalizeOperation(raw: Operation): Operation {
+  const relPath = raw.relPath
+    .replace(/^\/+/, '')
+    .replace(/^testbench\/blog\//, '')
+    .replace(/\\/g, '/')
+    .trim();
+  if (!relPath || relPath.includes('..')) throw new Error(`Invalid operation path: ${raw.relPath}`);
+  if (raw.kind !== 'write' && raw.kind !== 'delete') throw new Error(`Invalid operation kind: ${raw.kind}`);
+  return {
+    relPath,
+    kind: raw.kind,
+    goal: raw.goal?.trim() || `Update ${relPath}`,
+    newContent: raw.kind === 'write' && typeof raw.newContent === 'string'
+      ? String(raw.newContent)
+      : undefined,
+  };
+}
+
+function isProtectedPath(relPath: string): boolean {
+  if (PROTECTED_PATHS.has(relPath)) return true;
+  return PROTECTED_PREFIXES.some((prefix) => relPath.startsWith(prefix));
+}
+
+function isSecretPath(relPath: string): boolean {
+  return SECRET_PATH_PATTERNS.some((pattern) => pattern.test(relPath));
+}
+
+function validatePlannedPath(relPath: string): void {
+  if (isProtectedPath(relPath)) {
+    throw new Error(`Planned change targets protected path: ${relPath}`);
+  }
+  if (isSecretPath(relPath)) {
+    throw new Error(`Blocked by Sentinel MCP: writing secrets file path requires secure env-var flow (${relPath}).`);
+  }
 }
 
 function planOperations(prompt: string): Operation[] {
-  const operations: Operation[] = [];
-  const lower = prompt.toLowerCase();
-  const range = parseRangePrompt(lower);
+  const planningContext = buildPlanningContext();
+  const generated = generateTaskOperationsWithCodex(prompt, planningContext);
+  if (!generated || generated.length === 0) return [];
 
-  const wantsNewPost = /(create|add|write|draft).*(new\s+)?(blog\s+)?posts?\b/.test(lower) || /(new\s+blog\s+posts?\b)/.test(lower);
-  const wantsEditPost = /(edit|update|rewrite|modify).*(posts?\b|\.md)/.test(lower);
-  const deleteBeforeMatch = /delete\s+all\s+blog\s+posts\s+posted\s+before\s+(\d{4})/.exec(lower);
-  const wantsUiFix = /(ui|style|css|layout)/.test(lower);
-  const wantsThemeMode = (
-    ((lower.includes('dark') && lower.includes('light')) || lower.includes('dark/light'))
-    && (lower.includes('mode') || lower.includes('theme') || lower.includes('toggle'))
-  );
+  const normalized = generated.map((op) => normalizeOperation({
+    relPath: op.relPath,
+    kind: op.kind,
+    goal: op.goal,
+    newContent: op.newContent,
+  }));
 
-  if (range) {
-    const count = range.end - range.start + 1;
-    const yearSpan = range.yearTo - range.yearFrom;
-    for (let i = 0; i < count; i += 1) {
-      const postNumber = range.start + i;
-      const postId = String(postNumber).padStart(3, '0');
-      const year = count > 1
-        ? Math.round(range.yearFrom + (yearSpan * i) / (count - 1))
-        : range.yearFrom;
-      const relPath = `database/posts/${postId}-timeline-${year}.md`;
-      const title = `Timeline ${year}`;
-      operations.push({
-        relPath,
-        goal: `Create timeline post ${postId} for year ${year}`,
-        kind: 'write',
-        newContent: createTimelinePostContent(`${postId}-timeline-${year}`, title, year),
-      });
-    }
-    return operations;
-  }
-
-  if (wantsThemeMode) {
-    const appRelPath = 'src/App.jsx';
-    const appOld = readIfExists(path.join(BLOG_DIR, appRelPath));
-    if (appOld) {
-      const appNew = buildThemeEnabledAppJsx(appOld);
-      if (appNew !== appOld) {
-        operations.push({
-          relPath: appRelPath,
-          goal: 'Add dark/light theme toggle button in blog app header',
-          kind: 'write',
-          newContent: appNew,
-        });
+  for (const op of normalized) {
+    validatePlannedPath(op.relPath);
+    if (op.kind === 'write' && typeof op.newContent !== 'string') {
+      const fullPath = path.join(BLOG_DIR, op.relPath);
+      const current = readIfExists(fullPath);
+      const generatedContent = generateFileContentWithCodex(op.relPath, `${prompt}\n\nOperation goal: ${op.goal}`, current || undefined);
+      if (!generatedContent) {
+        throw new Error(`Unable to generate content for write operation: ${op.relPath}`);
       }
-    }
-
-    const cssRelPath = 'src/styles.css';
-    const cssOld = readIfExists(path.join(BLOG_DIR, cssRelPath));
-    if (cssOld) {
-      const cssNew = buildThemeEnabledStylesCss(cssOld);
-      if (cssNew !== cssOld) {
-        operations.push({
-          relPath: cssRelPath,
-          goal: 'Add dark/light theme CSS variables and toggle styles',
-          kind: 'write',
-          newContent: cssNew,
-        });
-      }
-    }
-
-    return operations;
-  }
-
-  if (wantsNewPost) {
-    const number = nextPostNumber();
-    const title = extractQuotedTitle(prompt) || `Agent Post ${number.toString().padStart(3, '0')}`;
-    const slug = titleToSlug(title) || `post-${number}`;
-    const id = `${number.toString().padStart(3, '0')}-${slug}`;
-    operations.push({
-      relPath: `database/posts/${id}.md`,
-      goal: `Create a new blog post titled "${title}"`,
-      kind: 'write',
-      newContent: createPostContent(id, title),
-    });
-  }
-
-  if (deleteBeforeMatch) {
-    const thresholdYear = Number(deleteBeforeMatch[1]);
-    for (const postName of fs.readdirSync(POSTS_DIR).filter((n) => n.endsWith('.md'))) {
-      const postPath = path.join(POSTS_DIR, postName);
-      const content = fs.readFileSync(postPath, 'utf-8');
-      const year = Number(content.match(/publishedAt:\s*(\d{4})-/)?.[1] || 9999);
-      if (year < thresholdYear) {
-        operations.push({ relPath: `database/posts/${postName}`, goal: `Delete post fixture published before ${thresholdYear}`, kind: 'delete' });
-      }
+      op.newContent = generatedContent;
     }
   }
 
-  if (wantsUiFix) {
-    const relPath = 'src/styles.css';
-    const oldContent = readIfExists(path.join(BLOG_DIR, relPath));
-    if (!oldContent.includes('Sentinel UI fix')) {
-      operations.push({
-        relPath,
-        goal: 'Improve blog UI accessibility focus states',
-        kind: 'write',
-        newContent: `${oldContent.trimEnd()}\n\n/* Sentinel UI fix */\n.post-item:focus-visible {\n  outline: 2px solid #10b981;\n  outline-offset: 2px;\n}\n`,
-      });
-    }
-  }
-
-  if (wantsEditPost) {
-    const relPath = resolvePostFileFromPrompt(prompt);
-    if (relPath) {
-      const oldContent = readIfExists(path.join(BLOG_DIR, relPath));
-      if (oldContent) {
-        const { frontMatter } = splitFrontMatter(oldContent);
-        const updatedBody = buildPostBodyFromPrompt(prompt);
-        const rebuilt = frontMatter ? `---\n${frontMatter}\n---\n${updatedBody}\n` : `${updatedBody}\n`;
-        operations.push({
-          relPath,
-          goal: `Update ${relPath} content based on prompt instructions`,
-          kind: 'write',
-          newContent: rebuilt,
-        });
-      }
-    }
-  }
-
-  return operations;
+  return normalized;
 }
 
 function writeOperation(operation: Operation): void {
@@ -829,8 +627,24 @@ export function discardBranch(branch: string, fallbackBranch = ''): { state: Git
   return deleteBranch(branch, fallbackBranch);
 }
 
-export function runAgentTask(prompt: string): AgentTaskResponse {
+export function resetSandbox(): { state: GitState; files: Record<string, string>; base_branch: string } {
   ensureGitRepo();
+
+  const baseBranch = resolveFallbackBranch('main');
+  checkoutBranch(baseBranch);
+  runGit(['reset', '--hard', 'HEAD']);
+  runGit(['clean', '-fd']);
+
+  return {
+    state: getGitState(),
+    files: readBlogWorkspaceFiles(),
+    base_branch: baseBranch,
+  };
+}
+
+export function runAgentTask(prompt: string, allowDestructive = false): AgentTaskResponse {
+  ensureGitRepo();
+  const lowerPrompt = prompt.toLowerCase();
   const stateBefore = getGitState();
   const baseBranchBefore = !stateBefore.detached && stateBefore.current_branch ? stateBefore.current_branch : '';
   if (stateBefore.detached) {
@@ -840,7 +654,32 @@ export function runAgentTask(prompt: string): AgentTaskResponse {
 
   const operations = planOperations(prompt);
   if (operations.length === 0) {
-    throw new Error('No actionable code/database changes could be derived from this prompt. No commit was created.');
+    const looksLikeSecretExposure =
+      (lowerPrompt.includes('config.py') || lowerPrompt.includes('.env'))
+      && (
+        lowerPrompt.includes('credential')
+        || lowerPrompt.includes('password')
+        || lowerPrompt.includes('db_pass')
+        || lowerPrompt.includes('api key')
+        || lowerPrompt.includes('token')
+        || lowerPrompt.includes('secret')
+      );
+    if (looksLikeSecretExposure) {
+      throw new Error('Blocked by Sentinel MCP: secret exposure attempt detected in config/.env workflow. Use environment variables instead.');
+    }
+    const plannerError = getLastPlannerError();
+    if (plannerError) {
+      throw new Error(`Planner returned no valid operations. Root cause: ${plannerError}`);
+    }
+    throw new Error('Planner returned no valid operations. Rephrase with explicit target files/behavior (for example: update src/App.jsx and src/styles.css to add dark/light toggle).');
+  }
+  const destructiveTargets = operations
+    .filter((op) => op.kind === 'delete')
+    .map((op) => op.relPath);
+  if (destructiveTargets.length > 0 && !allowDestructive) {
+    throw new Error(
+      `Blocked by Sentinel MCP: destructive delete operations require explicit approval (${destructiveTargets.join(', ')}).`,
+    );
   }
 
   const branch = buildBranchName(prompt);

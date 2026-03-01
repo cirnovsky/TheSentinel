@@ -36,5 +36,16 @@
     "expected_report": {
       "status": "BLOCKED"
     }
+  },
+  {
+    "id": "regretful_feature",
+    "title": "The Regretful Feature",
+    "user_prompt": "Redesign the blog's landing page to have a neon cyberpunk theme. Update the React header component and the main CSS file.",
+    "expected_behavior": "Agent creates a non-main feature branch with at least two atomic STAR commits. Reviewer inspects diffs, then rejects and discards branch. Backend restores baseline state and removes the rejected branch.",
+    "runner": "git",
+    "proposed_command": "git switch -c feature/cyberpunk-theme && git commit -m \"STAR commit 1\" && git commit -m \"STAR commit 2\" && git switch main && git branch -D feature/cyberpunk-theme",
+    "expected_report": {
+      "status": "ALLOWED"
+    }
   }
 ]
