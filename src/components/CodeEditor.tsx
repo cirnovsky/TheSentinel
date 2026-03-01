@@ -1,62 +1,47 @@
 import { useState, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
-import { FileCode, Save } from 'lucide-react';
+import { FileCode, Save, GitCommit } from 'lucide-react';
 
 interface CodeEditorProps {
   file: string | null;
+  files: Record<string, string>;
+  onSaveFile: (filePath: string, content: string) => Promise<void>;
+  onCommitFile: (filePath: string, content: string, goal: string) => Promise<void>;
 }
 
-const MOCK_FILES: Record<string, string> = {
-  'src/auth/login.ts': `export async function login(req, res) {
-  const { username, password } = req.body;
-  
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Missing credentials' });
-  }
-  
-  if (password.length < 8) {
-    return res.status(400).json({ error: 'Password too short' });
-  }
-  
-  const user = await db.users.find({ username });
-  // ...
-}`,
-  'src/db/schema.ts': `import { Schema } from 'mongoose';
+function getEditorLanguage(filePath: string | null): string {
+  if (!filePath) return 'plaintext';
+  if (filePath.endsWith('.ts')) return 'typescript';
+  if (filePath.endsWith('.tsx')) return 'typescript';
+  if (filePath.endsWith('.js')) return 'javascript';
+  if (filePath.endsWith('.jsx')) return 'javascript';
+  if (filePath.endsWith('.json')) return 'json';
+  if (filePath.endsWith('.md')) return 'markdown';
+  if (filePath.endsWith('.css')) return 'css';
+  if (filePath.endsWith('.html')) return 'html';
+  if (filePath.endsWith('.py')) return 'python';
+  if (filePath.endsWith('.sh')) return 'shell';
+  return 'plaintext';
+}
 
-export const UserSchema = new Schema({
-  username: {
-    type: String,
-    required: true,
-    unique: true
-  },
-  password: {
-    type: String,
-    required: true,
-    select: false,
-    minlength: [8, 'Password must be at least 8 characters long']
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
-  }
-});`,
-  'src/auth/index.ts': `export * from './login';
-export * from './register';
-export * from './logout';`
-};
-
-export default function CodeEditor({ file }: CodeEditorProps) {
+export default function CodeEditor({ file, files, onSaveFile, onCommitFile }: CodeEditorProps) {
   const [code, setCode] = useState<string>('');
   const [isSaved, setIsSaved] = useState(true);
+  const [goal, setGoal] = useState('');
+  const [isCommitting, setIsCommitting] = useState(false);
 
   useEffect(() => {
-    if (file && MOCK_FILES[file]) {
-      setCode(MOCK_FILES[file]);
+    if (file && files[file] !== undefined) {
+      setCode(files[file]);
+      setIsSaved(true);
+    } else if (file) {
+      setCode(`// File not available in the current explorer scope:\n// ${file}`);
       setIsSaved(true);
     } else {
-      setCode('// Select a file to view or edit its contents\n// The Sentinel will track all changes made here.');
+      setCode('// Select a file from File Explorer to view or edit its contents.');
+      setIsSaved(true);
     }
-  }, [file]);
+  }, [file, files]);
 
   const handleEditorChange = (value: string | undefined) => {
     if (value !== undefined) {
@@ -65,10 +50,22 @@ export default function CodeEditor({ file }: CodeEditorProps) {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (!file) return;
+    await onSaveFile(file, code);
     setIsSaved(true);
-    // In a real app, this would save to the file system
-    console.log('Saved file:', file);
+  };
+
+  const handleCommit = async () => {
+    if (!file) return;
+    setIsCommitting(true);
+    try {
+      await onCommitFile(file, code, goal.trim());
+      setGoal('');
+      setIsSaved(true);
+    } finally {
+      setIsCommitting(false);
+    }
   };
 
   return (
@@ -93,11 +90,30 @@ export default function CodeEditor({ file }: CodeEditorProps) {
           Save
         </button>
       </div>
+
+      <div className="h-12 border-b border-white/10 flex items-center gap-2 px-3 bg-[#101010]">
+        <input
+          value={goal}
+          onChange={(e) => setGoal(e.target.value)}
+          placeholder="Human commit goal (Task in STAR message)"
+          className="flex-1 h-8 bg-black/40 border border-white/10 rounded-md px-3 text-xs text-gray-200 focus:outline-none focus:border-emerald-500/50"
+        />
+        <button
+          onClick={handleCommit}
+          disabled={!file || isCommitting}
+          className="h-8 px-3 rounded-md text-xs font-medium bg-blue-500/20 text-blue-300 border border-blue-500/30 hover:bg-blue-500/30 disabled:opacity-50"
+        >
+          <span className="inline-flex items-center gap-1">
+            <GitCommit size={13} />
+            {isCommitting ? 'Committing...' : 'Commit'}
+          </span>
+        </button>
+      </div>
       
       <div className="flex-1 relative">
         <Editor
           height="100%"
-          defaultLanguage="typescript"
+          language={getEditorLanguage(file)}
           theme="vs-dark"
           value={code}
           onChange={handleEditorChange}

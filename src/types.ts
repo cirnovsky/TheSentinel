@@ -16,3 +16,16 @@ export interface Commit {
   diff: string;
   files: string[];
 }
+
+export interface GitState {
+  current_branch: string;
+  detached: boolean;
+  head_hash: string;
+  pending_changes: boolean;
+}
+
+export interface RuntimeStatus {
+  mode: 'codex_mcp' | 'local_fallback';
+  available: boolean;
+  reason: string;
+}
