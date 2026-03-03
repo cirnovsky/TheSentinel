@@ -61,6 +61,10 @@ Run from repository root: `/Users/cirnovsky/repos/dlweek/TheSentinel`
 
 **Before all setup, you need to go to `/TheSentinel/testbench/blog/` and change `.git.trick` to `.git`, and `.gitignore.trick` to `.gitignore`. VERY IMPORTANT!!**
 
+If `TheSentinel/testbench/blog/` already have `.git` and `.gitignore`, delete them and replace with `.git.trick` and `.gitignore.trick`.
+
+⚠️  This step below is unusual but compulsory! Please read carefully.
+
 ```bash
 cd /Users/cirnovsky/repos/dlweek/TheSentinel
 npm install
