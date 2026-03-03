@@ -63,7 +63,7 @@ Run from repository root: `/Users/cirnovsky/repos/dlweek/TheSentinel`
 
 If `TheSentinel/testbench/blog/` already have `.git` and `.gitignore`, delete them and replace with `.git.trick` and `.gitignore.trick`.
 
-⚠️  This step below is unusual but compulsory! Please read carefully.
+⚠️  This step above is unusual but compulsory! Please read carefully.
 
 ```bash
 cd /Users/cirnovsky/repos/dlweek/TheSentinel
