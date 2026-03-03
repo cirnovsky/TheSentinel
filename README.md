@@ -56,7 +56,10 @@ Notes:
 
 Run from repository root: `/Users/cirnovsky/repos/dlweek/TheSentinel`
 
+
 ### Default setup (recommended)
+
+**Before all setup, you need to go to `/TheSentinel/testbench/blog/` and change `.git.trick` to `.git`, and `.gitignore.trick` to `.gitignore`. VERY IMPORTANT!!**
 
 ```bash
 cd /Users/cirnovsky/repos/dlweek/TheSentinel
