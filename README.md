@@ -2,7 +2,7 @@
 
 The Sentinel is a safe, human-governed AI coding agent that acts as a contributor rather than a dictator.
 
-Project Demo Video: [Add video link here](https://example.com/demo)
+Project Demo Video: [Add video link here](https://www.youtube.com/watch?v=hjGhiMHuoCQ)
 
 ## 1. Innovations
 
@@ -26,8 +26,8 @@ Project Demo Video: [Add video link here](https://example.com/demo)
 
 ### Dependencies
 
-- Frontend + app server dependencies are managed by `npm` via [`package.json`](/Users/cirnovsky/repos/dlweek/TheSentinel/package.json).
-- Optional Python safeguard API dependencies are managed by [`requirements.txt`](/Users/cirnovsky/repos/dlweek/TheSentinel/requirements.txt).
+- Frontend + app server dependencies are managed by `npm` via [`package.json`](TheSentinel/package.json).
+- Optional Python safeguard API dependencies are managed by [`requirements.txt`](TheSentinel/requirements.txt).
 
 ### Environment setup
 
@@ -54,7 +54,7 @@ Notes:
 
 ## 3. Setup & Installation (Platform Agnostic)
 
-Run from repository root: `/Users/cirnovsky/repos/dlweek/TheSentinel`
+Run from repository root: `TheSentinel`
 
 
 ### Default setup (recommended)
@@ -66,7 +66,7 @@ If `TheSentinel/testbench/blog/` already have `.git` and `.gitignore`, delete th
 ⚠️  This step above is unusual but compulsory! Please read carefully.
 
 ```bash
-cd /Users/cirnovsky/repos/dlweek/TheSentinel
+cd TheSentinel
 npm install
 ```
 
@@ -75,7 +75,7 @@ npm install
 ### macOS / Linux
 
 ```bash
-cd /Users/cirnovsky/repos/dlweek/TheSentinel
+cd TheSentinel
 uv venv
 source .venv/bin/activate
 uv pip install -r requirements.txt
@@ -109,7 +109,7 @@ npm install
 Only one service is required for the full app experience:
 
 ```bash
-cd /Users/cirnovsky/repos/dlweek/TheSentinel
+cd TheSentinel
 npm run dev
 ```
 
@@ -123,14 +123,14 @@ Only run this if you want to demo Python endpoints directly.
 Terminal A:
 
 ```bash
-cd /Users/cirnovsky/repos/dlweek/TheSentinel
+cd TheSentinel
 uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Terminal B:
 
 ```bash
-cd /Users/cirnovsky/repos/dlweek/TheSentinel
+cd TheSentinel
 npm run dev
 ```
 
@@ -194,11 +194,11 @@ After trying preset scenarios, you can also type your own prompts in Chat and in
 - approve/merge vs reject/discard flows
 
 Detailed judge guide:
-- [`testbench/TESTBENCH_SETUP.md`](/Users/cirnovsky/repos/dlweek/TheSentinel/testbench/TESTBENCH_SETUP.md)
+- [`testbench/TESTBENCH_SETUP.md`](TheSentinel/testbench/TESTBENCH_SETUP.md)
 
 Test resources:
-- [`testbench/scripts/test_cases.md`](/Users/cirnovsky/repos/dlweek/TheSentinel/testbench/scripts/test_cases.md)
-- [`testbench/scripts/ui_test_resources.json`](/Users/cirnovsky/repos/dlweek/TheSentinel/testbench/scripts/ui_test_resources.json)
+- [`testbench/scripts/test_cases.md`](TheSentinel/testbench/scripts/test_cases.md)
+- [`testbench/scripts/ui_test_resources.json`](TheSentinel/testbench/scripts/ui_test_resources.json)
 
 ## 6. Run The Test Blog (Optional but Recommended)
 
@@ -207,7 +207,7 @@ If you want to run the mini blog project, used by the testbench:
 ### macOS / Linux
 
 ```bash
-cd /Users/cirnovsky/repos/dlweek/TheSentinel/testbench/blog
+cd TheSentinel/testbench/blog
 npm install
 npm run dev
 ```
