@@ -2,7 +2,7 @@
 
 The Sentinel is a safe, human-governed AI coding agent that acts as a contributor rather than a dictator.
 
-Project Demo Video: [Add video link here](https://www.youtube.com/watch?v=hjGhiMHuoCQ)
+Project Demo Video: [YouTube](https://www.youtube.com/watch?v=hjGhiMHuoCQ)
 
 ## 1. Innovations
 
